@@ -1,2 +1,3 @@
-# Password for /admin. Pick a long random string before deploying.
-ADMIN_TOKEN=change-me
+# Optional. If you leave ADMIN_TOKEN unset, /admin generates one on first
+# visit and shows it once so you can copy it.
+# ADMIN_TOKEN=

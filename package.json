@@ -16,7 +16,7 @@
   "cloudflare": {
     "bindings": {
       "ADMIN_TOKEN": {
-        "description": "Password for /admin. Use a long random string."
+        "description": "Optional. Leave blank — open /admin after deploy; a token is generated and shown once to copy. Or paste your own password here."
       }
     }
   },

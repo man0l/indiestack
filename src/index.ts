@@ -14,7 +14,7 @@ import {
   ago,
   html,
   loginPage,
-  setupPage,
+  revealPage,
   statusPage,
   type Stats,
 } from "./ui";
@@ -71,10 +71,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
 
   if (path === "/admin" || path.startsWith("/admin/")) {
-    if (!env.ADMIN_TOKEN) return html(setupPage(env.APP_NAME));
-    if (!(await isAdmin(request, env))) {
-      return html(loginPage(env.APP_NAME), 401);
-    }
+    const blocked = await gateAdmin(request, env);
+    if (blocked) return blocked;
     if (path === "/admin" && method === "GET") {
       return admin(env, url.origin, url.searchParams.get("msg"));
     }
@@ -292,13 +290,59 @@ async function saveSettings(request: Request, env: Env): Promise<Response> {
 }
 
 async function login(request: Request, env: Env): Promise<Response> {
-  if (!env.ADMIN_TOKEN) return html(setupPage(env.APP_NAME));
+  const expected = await resolveAdminToken(env);
+  if (!expected) {
+    const minted = await mintAdminToken(env);
+    if (minted.created) return html(revealPage(env.APP_NAME, minted.token));
+  }
   const form = await request.formData();
   const token = String(form.get("token") ?? "");
-  if (!(await safeEqual(token, env.ADMIN_TOKEN))) {
+  const want = (await resolveAdminToken(env)) ?? "";
+  if (!want || !(await safeEqual(token, want))) {
     return html(loginPage(env.APP_NAME, "wrong token"), 401);
   }
   return redirect("/admin", { "set-cookie": setCookie(request, token) });
+}
+
+async function gateAdmin(request: Request, env: Env): Promise<Response | null> {
+  let expected = await resolveAdminToken(env);
+  if (!expected) {
+    const minted = await mintAdminToken(env);
+    if (minted.created) return html(revealPage(env.APP_NAME, minted.token));
+    expected = minted.token;
+  }
+  if (!(await isAdmin(request, expected))) {
+    return html(loginPage(env.APP_NAME), 401);
+  }
+  return null;
+}
+
+function envToken(env: Env): string | null {
+  const v = (env as { ADMIN_TOKEN?: string }).ADMIN_TOKEN?.trim() ?? "";
+  if (!v || v === "change-me") return null;
+  return v;
+}
+
+async function resolveAdminToken(env: Env): Promise<string | null> {
+  return envToken(env) ?? (await getSetting(env.DB, "admin_token"));
+}
+
+async function mintAdminToken(env: Env): Promise<{ token: string; created: boolean }> {
+  const generated = generateToken();
+  const ins = await env.DB.prepare(
+    "INSERT INTO settings (key, value) VALUES ('admin_token', ?) ON CONFLICT(key) DO NOTHING",
+  )
+    .bind(generated)
+    .run();
+  const created = (ins.meta.changes ?? 0) > 0;
+  const token = created ? generated : ((await getSetting(env.DB, "admin_token")) ?? generated);
+  return { token, created };
+}
+
+function generateToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function listMonitors(env: Env): Promise<Monitor[]> {
@@ -354,7 +398,7 @@ async function healthJson(env: Env): Promise<Response> {
   });
 }
 
-async function isAdmin(request: Request, env: Env): Promise<boolean> {
+async function isAdmin(request: Request, expected: string): Promise<boolean> {
   const fromCookie = cookieValue(request, COOKIE);
   const auth = request.headers.get("authorization");
   const fromHeader = auth?.toLowerCase().startsWith("bearer ")
@@ -362,7 +406,7 @@ async function isAdmin(request: Request, env: Env): Promise<boolean> {
     : null;
   const got = fromCookie ?? fromHeader;
   if (!got) return false;
-  return safeEqual(got, env.ADMIN_TOKEN);
+  return safeEqual(got, expected);
 }
 
 function cookieValue(request: Request, name: string): string | null {

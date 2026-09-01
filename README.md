@@ -4,9 +4,11 @@ Uptime checks and cron **monitoring** that run on **your** Cloudflare account. O
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/man0l/indiestack)
 
-**The form will ask for GitHub. That is required.** Cloudflare does not upload the Worker from this page; it creates a **new** repo under *your* GitHub and deploys from there (so every later `git push` ships). Click **New GitHub connection**, authorize the Cloudflare GitHub App, then **Deploy**. Leave D1/R2 on “Create new”. When it asks for `ADMIN_TOKEN`, use a long random string.
+**The form will ask for GitHub. That is required.** Cloudflare does not upload the Worker from this page; it creates a **new** repo under *your* GitHub and deploys from there (so every later `git push` ships). Click **New GitHub connection**, authorize the Cloudflare GitHub App, then **Deploy**. Leave D1/R2 on “Create new”. Leave `ADMIN_TOKEN` blank if the form shows it.
 
 If GitHub already has a repo named `indiestack`, change **Project name** on that screen (e.g. `indiestack-ops`) or the create will fail.
+
+After deploy, open `https://<worker>.workers.dev/admin`. A random token is generated and shown **once** — copy it, then continue. That is your login. The Worker cannot write Cloudflare secrets itself; the token is stored in your D1. You can later paste the same value as Worker secret `ADMIN_TOKEN` in the dashboard if you want.
 
 Do not want a second GitHub repo? Skip the button and use [CLI deploy](#cli-deploy-if-you-skip-the-button) from this repo.
 
@@ -45,8 +47,8 @@ What you give up vs the paid tools: no SMS, no multi-region probe network, no 15
 
 ## After you click the button
 
-1. Set `ADMIN_TOKEN` to a long random string when Cloudflare asks.
-2. Open `https://<worker>.workers.dev/admin` and sign in with that token.
+1. Open `https://<worker>.workers.dev/admin`.
+2. Copy the generated token (shown once), then you are in.
 3. Add `https://your-app.example` — public status is `/`.
 4. Optional: Discord/Slack webhook for down/up.
 5. Optional: add a **cron monitor**. Your job hits:

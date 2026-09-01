@@ -240,22 +240,37 @@ export function loginPage(title: string, error?: string): string {
        </label>
        <button type="submit">enter</button>
      </form>
-     <footer>Set <code>ADMIN_TOKEN</code> as a Worker secret. Local: copy <code>.dev.vars.example</code> to <code>.dev.vars</code>.</footer>`,
+     <footer>This is the token shown on first visit to <code>/admin</code>. If you lost it, set Worker secret <code>ADMIN_TOKEN</code>.</footer>`,
   );
 }
 
-export function setupPage(title: string): string {
+export function revealPage(title: string, token: string): string {
   return page(
     `setup · ${title}`,
     `<header><div class="brand">${esc(title)} <span>setup</span></div></header>
-     <h1 class="unknown">token missing</h1>
-     <p class="sub">This Worker has no <code>ADMIN_TOKEN</code> yet.</p>
+     <h1 class="unknown">copy this token</h1>
+     <p class="sub">This is your <code>/admin</code> password. It is shown <b>once</b>. Copy it before you continue.</p>
      <div class="card">
-       <p>Local:</p>
-       <p class="url">cp .dev.vars.example .dev.vars</p>
-       <p>Remote:</p>
-       <p class="url">npx wrangler secret put ADMIN_TOKEN</p>
-     </div>`,
+       <label>admin token
+         <input id="tok" type="text" readonly value="${esc(token)}" spellcheck="false"/>
+       </label>
+       <div class="actions">
+         <button type="button" id="copy">copy</button>
+         <form method="post" action="/login">
+           <input type="hidden" name="token" value="${esc(token)}"/>
+           <button type="submit">open admin</button>
+         </form>
+       </div>
+     </div>
+     <footer>Optional later: save the same value as Worker secret <code>ADMIN_TOKEN</code> in the Cloudflare dashboard.</footer>`,
+    `<script>
+      document.getElementById("copy")?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        const v = document.getElementById("tok")?.value ?? "";
+        try { await navigator.clipboard.writeText(v); btn.textContent = "copied"; }
+        catch { btn.textContent = "select and copy"; }
+      });
+    </script>`,
   );
 }
 
