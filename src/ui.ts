@@ -1,0 +1,408 @@
+import type { Job, Monitor } from "./tick";
+
+export type Stats = {
+  n: number;
+  ok_n: number;
+  avg_latency_ms: number | null;
+};
+
+export function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => {
+    switch (c) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+}
+
+export function ago(ts: number | null, now = Date.now()): string {
+  if (!ts) return "never";
+  const s = Math.max(0, Math.floor((now - ts) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function page(title: string, body: string, extraHead = ""): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>${esc(title)}</title>
+  <style>
+    :root {
+      --bg: #0e1014;
+      --card: #171a21;
+      --ink: #eef0f4;
+      --mute: #8b919c;
+      --line: #262b35;
+      --up: #3ee08f;
+      --down: #ff5d57;
+      --wait: #e6c15c;
+      --accent: #c8f542;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    main { max-width: 720px; margin: 0 auto; padding: 28px 20px 64px; }
+    header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 16px; margin-bottom: 28px; flex-wrap: wrap;
+    }
+    .brand { font-weight: 650; letter-spacing: -0.02em; }
+    .brand span { color: var(--mute); font-weight: 500; }
+    .led { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 25%, transparent);
+    }
+    .dot.up { background: var(--up); box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 25%, transparent); }
+    .dot.down { background: var(--down); box-shadow: 0 0 0 3px color-mix(in srgb, var(--down) 25%, transparent); }
+    .dot.paused { background: var(--mute); box-shadow: none; }
+    h1 {
+      font-size: 42px; letter-spacing: -0.04em; margin: 0 0 8px;
+      text-transform: uppercase;
+    }
+    h1.up { color: var(--up); }
+    h1.down { color: var(--down); }
+    h1.unknown { color: var(--wait); }
+    .sub { color: var(--mute); margin-bottom: 28px; }
+    h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); font-weight: 650; margin: 28px 0 0; }
+    .list { border-top: 1px solid var(--line); }
+    .row {
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .name { font-weight: 600; }
+    .url { color: var(--mute); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+    .meta { color: var(--mute); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    .meta b { color: var(--ink); font-weight: 600; }
+    form.rowish, .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+    label { display: block; font-size: 12px; color: var(--mute); margin-bottom: 10px; }
+    input[type=text], input[type=url], input[type=password], input[type=number], select {
+      width: 100%;
+      margin-top: 4px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--ink);
+      font: inherit;
+    }
+    button, .btn {
+      appearance: none; border: 0; border-radius: 8px;
+      background: var(--accent); color: #111; font-weight: 650;
+      padding: 8px 12px; cursor: pointer; font: inherit;
+    }
+    button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    button.danger { background: transparent; color: var(--down); border: 1px solid var(--line); }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .err { color: var(--down); margin: 0 0 16px; }
+    footer { margin-top: 36px; color: var(--mute); font-size: 12px; }
+    @media (max-width: 560px) {
+      h1 { font-size: 32px; }
+      .row { grid-template-columns: 14px 1fr; }
+      .meta, .actions { grid-column: 2; text-align: left; justify-content: flex-start; }
+    }
+  </style>
+  ${extraHead}
+</head>
+<body>
+  <main>${body}</main>
+</body>
+</html>`;
+}
+
+function liveStatus(enabled: number, status: string): string {
+  return enabled ? status : "paused";
+}
+
+function overallOf(monitors: Monitor[], jobs: Job[]): { overall: string; headline: string } {
+  const liveM = monitors.filter((m) => m.enabled);
+  const liveJ = jobs.filter((j) => j.enabled);
+  if (liveM.length === 0 && liveJ.length === 0) {
+    return { overall: "unknown", headline: "idle" };
+  }
+  const down =
+    liveM.filter((m) => m.status === "down").length +
+    liveJ.filter((j) => j.status === "down").length;
+  const known =
+    liveM.filter((m) => m.status !== "unknown").length +
+    liveJ.filter((j) => j.status !== "unknown").length;
+  if (down > 0) return { overall: "down", headline: `${down} down` };
+  if (known > 0) return { overall: "up", headline: "all systems up" };
+  return { overall: "unknown", headline: "waiting" };
+}
+
+export function statusPage(
+  title: string,
+  monitors: Monitor[],
+  jobs: Job[],
+  stats: Record<string, Stats>,
+): string {
+  const { overall, headline } = overallOf(monitors, jobs);
+  const word = overall === "down" ? "down" : overall === "up" ? "up" : "idle";
+
+  const httpRows =
+    monitors.length === 0
+      ? ""
+      : `<h2>http</h2><div class="list">${monitors
+          .map((m) => {
+            const st = stats[m.id];
+            const uptime =
+              st && st.n > 0 ? `${Math.round((st.ok_n / st.n) * 1000) / 10}% 24h` : "—";
+            const lat = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : "—";
+            const dot = liveStatus(m.enabled, m.status);
+            return `<div class="row">
+              <div class="dot ${esc(dot)}"></div>
+              <div>
+                <div class="name">${esc(m.name)}${m.enabled ? "" : " · paused"}</div>
+                <div class="url">${esc(m.url)}</div>
+              </div>
+              <div class="meta"><b>${esc(lat)}</b><br/>${esc(ago(m.last_check_at))} · ${esc(uptime)}</div>
+            </div>`;
+          })
+          .join("")}</div>`;
+
+  const jobRows =
+    jobs.length === 0
+      ? ""
+      : `<h2>cron</h2><div class="list">${jobs
+          .map((j) => {
+            const dot = liveStatus(j.enabled, j.status);
+            return `<div class="row">
+              <div class="dot ${esc(dot)}"></div>
+              <div>
+                <div class="name">${esc(j.name)}${j.enabled ? "" : " · paused"}</div>
+                <div class="url">heartbeat every ${j.interval_min}m · grace ${j.grace_min}m</div>
+              </div>
+              <div class="meta"><b>last beat</b><br/>${esc(ago(j.last_beat_at))}</div>
+            </div>`;
+          })
+          .join("")}</div>`;
+
+  const empty =
+    monitors.length === 0 && jobs.length === 0
+      ? `<p class="sub">Nothing watched yet. Add URLs or heartbeats at <a href="/admin">/admin</a>.</p>`
+      : "";
+
+  return page(
+    `${title} · ${headline}`,
+    `<header>
+      <div class="brand">${esc(title)} <span>status</span></div>
+      <div class="led"><div class="dot ${overall}"></div>${esc(headline)}</div>
+    </header>
+    <h1 class="${overall}">${esc(word)}</h1>
+    <p class="sub">HTTP checks and job heartbeats. Last 24 hours in D1.</p>
+    ${empty}${httpRows}${jobRows}
+    <footer>indiestack · one project, one worker</footer>`,
+    `<meta http-equiv="refresh" content="30"/>`,
+  );
+}
+
+export function loginPage(title: string, error?: string): string {
+  return page(
+    `admin · ${title}`,
+    `<header><div class="brand">${esc(title)} <span>admin</span></div></header>
+     ${error ? `<p class="err">${esc(error)}</p>` : ""}
+     <form class="card" method="post" action="/login">
+       <label>token
+         <input type="password" name="token" autocomplete="current-password" required autofocus/>
+       </label>
+       <button type="submit">enter</button>
+     </form>
+     <footer>Set <code>ADMIN_TOKEN</code> as a Worker secret. Local: copy <code>.dev.vars.example</code> to <code>.dev.vars</code>.</footer>`,
+  );
+}
+
+export function setupPage(title: string): string {
+  return page(
+    `setup · ${title}`,
+    `<header><div class="brand">${esc(title)} <span>setup</span></div></header>
+     <h1 class="unknown">token missing</h1>
+     <p class="sub">This Worker has no <code>ADMIN_TOKEN</code> yet.</p>
+     <div class="card">
+       <p>Local:</p>
+       <p class="url">cp .dev.vars.example .dev.vars</p>
+       <p>Remote:</p>
+       <p class="url">npx wrangler secret put ADMIN_TOKEN</p>
+     </div>`,
+  );
+}
+
+export function adminPage(
+  title: string,
+  origin: string,
+  monitors: Monitor[],
+  jobs: Job[],
+  webhook: string,
+  rollups: string[],
+  flash?: string,
+): string {
+  const list =
+    monitors.length === 0
+      ? `<p class="sub">No HTTP monitors. Add an HTTPS URL below.</p>`
+      : monitors
+          .map((m) => {
+            const extra = [
+              m.keyword ? `keyword ${m.keyword_mode ?? "exists"} “${m.keyword}”` : "",
+              m.expect_status ? `status ${m.expect_status}` : "",
+              m.max_latency_ms ? `slow >${m.max_latency_ms}ms` : "",
+              m.last_error ?? "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return `<div class="row">
+              <div class="dot ${esc(liveStatus(m.enabled, m.status))}"></div>
+              <div>
+                <div class="name">${esc(m.name)} · every ${m.interval_min}m${m.enabled ? "" : " · paused"}</div>
+                <div class="url">${esc(m.url)}${extra ? ` · ${esc(extra)}` : ""}</div>
+              </div>
+              <div class="actions">
+                <form method="post" action="/admin/monitors/${esc(m.id)}/toggle">
+                  <button class="ghost" type="submit">${m.enabled ? "pause" : "resume"}</button>
+                </form>
+                <form method="post" action="/admin/monitors/${esc(m.id)}/delete">
+                  <button class="danger" type="submit">remove</button>
+                </form>
+              </div>
+            </div>`;
+          })
+          .join("");
+
+  const jobList =
+    jobs.length === 0
+      ? `<p class="sub">No heartbeats. Your job should POST the URL we give you.</p>`
+      : jobs
+          .map((j) => {
+            const beat = `${origin}/beat/${j.token}`;
+            return `<div class="row">
+              <div class="dot ${esc(liveStatus(j.enabled, j.status))}"></div>
+              <div>
+                <div class="name">${esc(j.name)} · every ${j.interval_min}m + ${j.grace_min}m grace${j.enabled ? "" : " · paused"}</div>
+                <div class="url">curl -fsS -X POST ${esc(beat)}</div>
+                <div class="url">last beat ${esc(ago(j.last_beat_at))}${j.last_error ? ` · ${esc(j.last_error)}` : ""}</div>
+              </div>
+              <div class="actions">
+                <form method="post" action="/admin/jobs/${esc(j.id)}/toggle">
+                  <button class="ghost" type="submit">${j.enabled ? "pause" : "resume"}</button>
+                </form>
+                <form method="post" action="/admin/jobs/${esc(j.id)}/delete">
+                  <button class="danger" type="submit">remove</button>
+                </form>
+              </div>
+            </div>`;
+          })
+          .join("");
+
+  const history =
+    rollups.length === 0
+      ? `<p class="sub">Daily JSON land in R2 after midnight UTC.</p>`
+      : `<ul>${rollups
+          .map((d) => `<li><a href="/admin/rollups/${esc(d)}">${esc(d)}</a></li>`)
+          .join("")}</ul>`;
+
+  return page(
+    `admin · ${title}`,
+    `<header>
+      <div class="brand">${esc(title)} <span>admin</span></div>
+      <div class="actions">
+        <form method="post" action="/admin/check"><button type="submit">check now</button></form>
+        <form method="post" action="/logout"><button class="ghost" type="submit">logout</button></form>
+      </div>
+    </header>
+    ${flash ? `<p class="sub">${esc(flash)}</p>` : ""}
+    <p class="sub">${monitors.length}/20 http · ${jobs.length}/20 cron · public <a href="/">/</a></p>
+    <h2>http</h2>
+    <div class="list">${list}</div>
+    <form class="card" method="post" action="/admin/monitors">
+      <label>url
+        <input type="url" name="url" placeholder="https://example.com" required/>
+      </label>
+      <label>name (optional)
+        <input type="text" name="name" maxlength="40" placeholder="api"/>
+      </label>
+      <label>interval minutes
+        <input type="number" name="interval_min" min="1" max="60" value="5"/>
+      </label>
+      <label>expected status (0 = any 2xx)
+        <input type="number" name="expect_status" min="0" max="599" value="0"/>
+      </label>
+      <label>timeout ms
+        <input type="number" name="timeout_ms" min="1000" max="15000" value="8000"/>
+      </label>
+      <label>slow if slower than ms (0 = off)
+        <input type="number" name="max_latency_ms" min="0" max="15000" value="0"/>
+      </label>
+      <label>keyword (optional)
+        <input type="text" name="keyword" maxlength="80" placeholder="ok"/>
+      </label>
+      <label>keyword mode
+        <select name="keyword_mode">
+          <option value="exists">must contain</option>
+          <option value="absent">must not contain</option>
+        </select>
+      </label>
+      <button type="submit">add monitor</button>
+    </form>
+    <h2>cron monitor</h2>
+    <div class="list">${jobList}</div>
+    <form class="card" method="post" action="/admin/jobs">
+      <label>name
+        <input type="text" name="name" maxlength="40" placeholder="nightly-backup" required/>
+      </label>
+      <label>expect a beat every (minutes)
+        <input type="number" name="interval_min" min="1" max="1440" value="60"/>
+      </label>
+      <label>grace minutes
+        <input type="number" name="grace_min" min="0" max="120" value="2"/>
+      </label>
+      <button type="submit">add heartbeat</button>
+    </form>
+    <form class="card" method="post" action="/admin/settings">
+      <label>alert webhook (discord / slack / generic JSON)
+        <input type="url" name="webhook_url" value="${esc(webhook)}" placeholder="https://discord.com/api/webhooks/…"/>
+      </label>
+      <button type="submit">save webhook</button>
+    </form>
+    <h2>rollups</h2>
+    ${history}
+    <footer>HTTP uses 2-strike alerts. A heartbeat alerts on the first miss after grace.</footer>`,
+  );
+}
+
+export function html(body: string, status = 200, headers?: HeadersInit): Response {
+  return new Response(body, {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8", ...headers },
+  });
+}

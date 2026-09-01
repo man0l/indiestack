@@ -1,0 +1,2 @@
+# Password for /admin. Pick a long random string before deploying.
+ADMIN_TOKEN=change-me

@@ -1,0 +1,422 @@
+import {
+  MAX_JOBS,
+  MAX_MONITORS,
+  getSetting,
+  ping,
+  recordBeat,
+  runTick,
+  setSetting,
+  type Job,
+  type Monitor,
+} from "./tick";
+import {
+  adminPage,
+  ago,
+  html,
+  loginPage,
+  setupPage,
+  statusPage,
+  type Stats,
+} from "./ui";
+
+const COOKIE = "indie_admin";
+
+export default {
+  async fetch(request, env) {
+    return handle(request, env);
+  },
+  async scheduled(_controller, env) {
+    await runTick(env).catch((err) => {
+      console.error("tick failed", String(err));
+    });
+  },
+} satisfies ExportedHandler<Env>;
+
+async function handle(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const method = request.method;
+
+  if (path === "/favicon.ico") {
+    return new Response(null, { status: 204 });
+  }
+
+  const beat = path.match(/^\/beat\/([A-Za-z0-9_-]+)$/);
+  if (beat && (method === "GET" || method === "POST")) {
+    return beatJob(beat[1], env);
+  }
+
+  if (path === "/health.json" && method === "GET") {
+    return healthJson(env);
+  }
+  if ((path === "/health" || path === "/") && method === "HEAD") {
+    const h = await health(env);
+    return new Response(null, { status: h.down > 0 ? 503 : 200 });
+  }
+  if (path === "/health" && method === "GET") {
+    const h = await health(env);
+    return new Response(h.down > 0 ? "down" : "up", {
+      status: h.down > 0 ? 503 : 200,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  if ((path === "/" || path === "/status") && method === "GET") {
+    return status(env);
+  }
+  if (path === "/login" && method === "POST") {
+    return login(request, env);
+  }
+  if (path === "/logout" && method === "POST") {
+    return redirect("/", { "set-cookie": clearCookie(request) });
+  }
+
+  if (path === "/admin" || path.startsWith("/admin/")) {
+    if (!env.ADMIN_TOKEN) return html(setupPage(env.APP_NAME));
+    if (!(await isAdmin(request, env))) {
+      return html(loginPage(env.APP_NAME), 401);
+    }
+    if (path === "/admin" && method === "GET") {
+      return admin(env, url.origin, url.searchParams.get("msg"));
+    }
+    if (path === "/admin/monitors" && method === "POST") {
+      return addMonitor(request, env);
+    }
+    const monToggle = path.match(/^\/admin\/monitors\/([^/]+)\/toggle$/);
+    if (monToggle && method === "POST") {
+      return toggleRow(env, "monitors", monToggle[1]);
+    }
+    const monDel = path.match(/^\/admin\/monitors\/([^/]+)\/delete$/);
+    if (monDel && method === "POST") {
+      return deleteMonitor(monDel[1], env);
+    }
+    if (path === "/admin/jobs" && method === "POST") {
+      return addJob(request, env);
+    }
+    const jobToggle = path.match(/^\/admin\/jobs\/([^/]+)\/toggle$/);
+    if (jobToggle && method === "POST") {
+      return toggleRow(env, "jobs", jobToggle[1]);
+    }
+    const jobDel = path.match(/^\/admin\/jobs\/([^/]+)\/delete$/);
+    if (jobDel && method === "POST") {
+      return deleteJob(jobDel[1], env);
+    }
+    if (path === "/admin/settings" && method === "POST") {
+      return saveSettings(request, env);
+    }
+    if (path === "/admin/check" && method === "POST") {
+      const result = await runTick(env);
+      return redirect(
+        `/admin?msg=${encodeURIComponent(`checked ${result.checked} · jobs ${result.jobs}`)}`,
+      );
+    }
+    const roll = path.match(/^\/admin\/rollups\/(\d{4}-\d{2}-\d{2})$/);
+    if (roll && method === "GET") {
+      const obj = await env.BUCKET.get(`rollups/${roll[1]}.json`);
+      if (!obj) return new Response("not found", { status: 404 });
+      return new Response(obj.body, {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }
+
+  return new Response("not found", { status: 404 });
+}
+
+async function beatJob(token: string, env: Env): Promise<Response> {
+  const job = await recordBeat(env, token);
+  if (!job) return Response.json({ ok: false, error: "unknown token" }, { status: 404 });
+  return Response.json({
+    ok: true,
+    name: job.name,
+    last_beat_at: job.last_beat_at,
+  });
+}
+
+async function status(env: Env): Promise<Response> {
+  const monitors = await listMonitors(env);
+  const jobs = await listJobs(env);
+  const statsRows = await env.DB.prepare(
+    `SELECT monitor_id AS id, COUNT(*) AS n, SUM(ok) AS ok_n, AVG(latency_ms) AS avg_latency_ms
+     FROM checks GROUP BY monitor_id`,
+  ).all<{ id: string; n: number; ok_n: number; avg_latency_ms: number | null }>();
+  const stats: Record<string, Stats> = {};
+  for (const row of statsRows.results ?? []) {
+    stats[row.id] = {
+      n: Number(row.n) || 0,
+      ok_n: Number(row.ok_n) || 0,
+      avg_latency_ms: row.avg_latency_ms,
+    };
+  }
+  return html(statusPage(env.APP_NAME, monitors, jobs, stats));
+}
+
+async function admin(env: Env, origin: string, msg: string | null): Promise<Response> {
+  const monitors = await listMonitors(env);
+  const jobs = await listJobs(env);
+  const webhook = (await getSetting(env.DB, "webhook_url")) ?? "";
+  const listed = await env.BUCKET.list({ prefix: "rollups/" });
+  const rollups = listed.objects
+    .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
+    .sort()
+    .reverse();
+  return html(
+    adminPage(env.APP_NAME, origin, monitors, jobs, webhook, rollups, msg ?? undefined),
+  );
+}
+
+async function addMonitor(request: Request, env: Env): Promise<Response> {
+  const form = await request.formData();
+  const rawUrl = String(form.get("url") ?? "").trim();
+  const parsed = parseHttpUrl(rawUrl);
+  if (!parsed) return redirect("/admin?msg=bad%20url");
+
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM monitors").first<{ n: number }>();
+  if ((count?.n ?? 0) >= MAX_MONITORS) {
+    return redirect("/admin?msg=max%2020%20monitors");
+  }
+
+  const name = String(form.get("name") ?? "").trim() || parsed.host;
+  const interval = clamp(Number(form.get("interval_min") ?? 5), 1, 60);
+  const expectStatus = clamp(Number(form.get("expect_status") ?? 0), 0, 599);
+  const timeoutMs = clamp(Number(form.get("timeout_ms") ?? 8000), 1000, 15000);
+  const maxLatencyRaw = Number(form.get("max_latency_ms") ?? 0);
+  const maxLatency =
+    Number.isFinite(maxLatencyRaw) && maxLatencyRaw > 0
+      ? clamp(maxLatencyRaw, 1, 15000)
+      : null;
+  const keyword = String(form.get("keyword") ?? "").trim().slice(0, 80) || null;
+  const keywordMode = keyword
+    ? String(form.get("keyword_mode") ?? "exists") === "absent"
+      ? "absent"
+      : "exists"
+    : null;
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const url = parsed.toString();
+  const result = await ping({
+    url,
+    timeout_ms: timeoutMs,
+    expect_status: expectStatus,
+    keyword,
+    keyword_mode: keywordMode,
+    max_latency_ms: maxLatency,
+  });
+  const status = result.ok ? "up" : "down";
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO monitors (
+         id, name, url, interval_min, expect_status, timeout_ms,
+         keyword, keyword_mode, max_latency_ms, created_at, status, last_check_at,
+         last_status_code, last_latency_ms, last_error, consecutive
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    ).bind(
+      id,
+      name.slice(0, 40),
+      url,
+      interval,
+      expectStatus,
+      timeoutMs,
+      keyword,
+      keywordMode,
+      maxLatency,
+      now,
+      status,
+      now,
+      result.status_code,
+      result.latency_ms,
+      result.error,
+    ),
+    env.DB.prepare(
+      `INSERT INTO checks (monitor_id, ts, ok, status_code, latency_ms, error)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(id, now, result.ok ? 1 : 0, result.status_code, result.latency_ms, result.error),
+  ]);
+  return redirect("/admin?msg=added");
+}
+
+async function addJob(request: Request, env: Env): Promise<Response> {
+  const form = await request.formData();
+  const name = String(form.get("name") ?? "").trim().slice(0, 40);
+  if (!name) return redirect("/admin?msg=name%20required");
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM jobs").first<{ n: number }>();
+  if ((count?.n ?? 0) >= MAX_JOBS) return redirect("/admin?msg=max%2020%20jobs");
+  const interval = clamp(Number(form.get("interval_min") ?? 60), 1, 1440);
+  const grace = clamp(Number(form.get("grace_min") ?? 2), 0, 120);
+  const id = crypto.randomUUID();
+  const token = crypto.randomUUID().replaceAll("-", "");
+  await env.DB.prepare(
+    `INSERT INTO jobs (id, name, token, interval_min, grace_min, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(id, name, token, interval, grace, Date.now())
+    .run();
+  return redirect("/admin?msg=heartbeat%20added");
+}
+
+async function deleteMonitor(id: string, env: Env): Promise<Response> {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM checks WHERE monitor_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM monitors WHERE id = ?").bind(id),
+  ]);
+  return redirect("/admin?msg=removed");
+}
+
+async function deleteJob(id: string, env: Env): Promise<Response> {
+  await env.DB.prepare("DELETE FROM jobs WHERE id = ?").bind(id).run();
+  return redirect("/admin?msg=removed");
+}
+
+async function toggleRow(
+  env: Env,
+  table: "monitors" | "jobs",
+  id: string,
+): Promise<Response> {
+  await env.DB.prepare(`UPDATE ${table} SET enabled = 1 - enabled WHERE id = ?`)
+    .bind(id)
+    .run();
+  return redirect("/admin?msg=toggled");
+}
+
+async function saveSettings(request: Request, env: Env): Promise<Response> {
+  const form = await request.formData();
+  const webhook = String(form.get("webhook_url") ?? "").trim();
+  if (webhook) {
+    const parsed = parseHttpUrl(webhook);
+    if (!parsed) return redirect("/admin?msg=bad%20webhook");
+    await setSetting(env.DB, "webhook_url", parsed.toString());
+  } else {
+    await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind("webhook_url").run();
+  }
+  return redirect("/admin?msg=saved");
+}
+
+async function login(request: Request, env: Env): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return html(setupPage(env.APP_NAME));
+  const form = await request.formData();
+  const token = String(form.get("token") ?? "");
+  if (!(await safeEqual(token, env.ADMIN_TOKEN))) {
+    return html(loginPage(env.APP_NAME, "wrong token"), 401);
+  }
+  return redirect("/admin", { "set-cookie": setCookie(request, token) });
+}
+
+async function listMonitors(env: Env): Promise<Monitor[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT * FROM monitors ORDER BY created_at ASC",
+  ).all<Monitor>();
+  return results ?? [];
+}
+
+async function listJobs(env: Env): Promise<Job[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT * FROM jobs ORDER BY created_at ASC",
+  ).all<Job>();
+  return results ?? [];
+}
+
+async function health(env: Env): Promise<{ up: number; down: number; unknown: number }> {
+  const row = await env.DB.prepare(
+    `SELECT
+       SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) AS up,
+       SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) AS down,
+       SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) AS unknown
+     FROM (
+       SELECT status FROM monitors WHERE enabled = 1
+       UNION ALL
+       SELECT status FROM jobs WHERE enabled = 1
+     ) AS live`,
+  ).first<{ up: number; down: number; unknown: number }>();
+  return {
+    up: Number(row?.up) || 0,
+    down: Number(row?.down) || 0,
+    unknown: Number(row?.unknown) || 0,
+  };
+}
+
+async function healthJson(env: Env): Promise<Response> {
+  const h = await health(env);
+  const lastCheck = (
+    await env.DB.prepare("SELECT MAX(last_check_at) AS ts FROM monitors").first<{
+      ts: number | null;
+    }>()
+  )?.ts;
+  const lastBeat = (
+    await env.DB.prepare("SELECT MAX(last_beat_at) AS ts FROM jobs").first<{
+      ts: number | null;
+    }>()
+  )?.ts;
+  const last = Math.max(lastCheck ?? 0, lastBeat ?? 0) || null;
+  return Response.json({
+    ok: h.down === 0,
+    ...h,
+    checked: ago(last),
+  });
+}
+
+async function isAdmin(request: Request, env: Env): Promise<boolean> {
+  const fromCookie = cookieValue(request, COOKIE);
+  const auth = request.headers.get("authorization");
+  const fromHeader = auth?.toLowerCase().startsWith("bearer ")
+    ? auth.slice(7)
+    : null;
+  const got = fromCookie ?? fromHeader;
+  if (!got) return false;
+  return safeEqual(got, env.ADMIN_TOKEN);
+}
+
+function cookieValue(request: Request, name: string): string | null {
+  const cookie = request.headers.get("cookie") ?? "";
+  for (const part of cookie.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
+function setCookie(request: Request, token: string): string {
+  const url = new URL(request.url);
+  const secure = url.protocol === "https:" ? "; Secure" : "";
+  return `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure}`;
+}
+
+function clearCookie(request: Request): string {
+  const url = new URL(request.url);
+  const secure = url.protocol === "https:" ? "; Secure" : "";
+  return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
+}
+
+function redirect(location: string, headers?: HeadersInit): Response {
+  return new Response(null, {
+    status: 303,
+    headers: { location, ...headers },
+  });
+}
+
+function parseHttpUrl(raw: string): URL | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u;
+  } catch {
+    return null;
+  }
+}
+
+function clamp(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+async function safeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const aa = enc.encode(a);
+  const bb = enc.encode(b);
+  const n = Math.max(aa.byteLength, bb.byteLength, 1);
+  const xa = new Uint8Array(n);
+  const xb = new Uint8Array(n);
+  xa.set(aa);
+  xb.set(bb);
+  const sameLen = aa.byteLength === bb.byteLength;
+  return crypto.subtle.timingSafeEqual(xa, xb) && sameLen;
+}
