@@ -53,8 +53,8 @@ export function explorerPage(
             const lvl = (e.level ?? "log").toLowerCase();
             const payload =
               e.data == null ? "" : esc(typeof e.data === "string" ? e.data : JSON.stringify(e.data, null, 2));
-            return `<details class="row" style="display:block;padding:14px 0">
-              <summary style="cursor:pointer;list-style:none;display:grid;grid-template-columns:14px 1fr auto;gap:12px;align-items:center">
+            return `<details class="log-event">
+              <summary>
                 <span class="log-lvl ${esc(lvl)}">${esc(e.level ?? "log")}</span>
                 <span>
                   <span class="name">${esc(e.message)}</span>
@@ -62,7 +62,7 @@ export function explorerPage(
                 </span>
                 <span class="meta">${esc(ago(e.ts))}</span>
               </summary>
-              ${payload ? `<pre class="url" style="white-space:pre-wrap;margin:12px 0 0">${payload}</pre>` : `<p class="sub">No payload.</p>`}
+              ${payload ? `<pre class="url" style="white-space:pre-wrap">${payload}</pre>` : `<p class="sub">No payload.</p>`}
             </details>`;
           })
           .join("")}</div>`;

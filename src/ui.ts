@@ -140,6 +140,18 @@ export function page(title: string, body: string, extraHead = ""): string {
     .log-lvl { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); }
     .log-lvl.error, .log-lvl.err, .log-lvl.fatal { color: var(--down); }
     .log-lvl.warn, .log-lvl.warning { color: var(--wait); }
+    .log-event { display: block; padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .log-event > summary {
+      cursor: pointer;
+      list-style: none;
+      display: grid;
+      grid-template-columns: 4.75rem minmax(0, 1fr) auto;
+      gap: 12px 16px;
+      align-items: start;
+    }
+    .log-event > summary::-webkit-details-marker { display: none; }
+    .log-event .log-lvl { padding-top: 3px; min-width: 4.75rem; }
+    .log-event pre { margin: 12px 0 0  calc(4.75rem + 16px); }
     footer { margin-top: 36px; color: var(--mute); font-size: 12px; }
     details.fold { margin: 16px 0; }
     details.fold > summary {
@@ -159,6 +171,9 @@ export function page(title: string, body: string, extraHead = ""): string {
       h1 { font-size: 32px; }
       .row { grid-template-columns: 14px 1fr; }
       .meta, .actions { grid-column: 2; text-align: left; justify-content: flex-start; }
+      .log-event > summary { grid-template-columns: 4.75rem 1fr; }
+      .log-event .meta { grid-column: 2; text-align: left; }
+      .log-event pre { margin-left: 0; }
     }
   </style>
   ${extraHead}
