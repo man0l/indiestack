@@ -68,14 +68,14 @@ Multi-region confirm, SMS/voice, team seats, status-page subscribers, incident c
 
 ## Layout
 
-One Worker. Copy-paste folders under `src/`:
+One Worker. Copy-paste folders under `src/`. Each plugin exports a `Plugin` and is listed once in `kernel/catalog.ts`. Kernel mounts routes, admin slots, status slots, and tick — do not edit `ui.ts` to add a feature.
 
-- **kernel/** — types, D1, auth, alerts, R2 rollups, `scheduled()` tick
+- **kernel/** — types, D1, auth, alerts, R2 rollups, `scheduled()` tick, plugin host
 - **ping/** — HTTP/TCP/DNS/SSL/domain probes
 - **heartbeat/** — `/beat/:token`; tick marks it down if `last_beat + interval + grace` is in the past
 - **logs/** — `POST /log/:token` → R2 (no D1 write on ingest); admin tail at `/admin/logs/:id`
 - **templates/** — one-click HTTPS/SSH/DNS/SSL/domain monitors
-- **index.ts** — routes · **ui.ts** — HTML
+- **index.ts** — Worker entry · **ui.ts** — page chrome only
 
 Caps: 20 HTTP monitors, 20 jobs. Default HTTP interval 5 min. Heartbeat grace default 2 min. Alert on first missed beat (grace is the buffer).
 

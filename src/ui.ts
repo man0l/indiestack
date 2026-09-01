@@ -1,13 +1,4 @@
-import { isMuted, type Incident, type Job, type Monitor } from "./kernel/types";
-import type { LogEvent, LogSource } from "./logs";
-import { kindOf } from "./ping/target";
-import { TEMPLATES } from "./templates";
-
-export type Stats = {
-  n: number;
-  ok_n: number;
-  avg_latency_ms: number | null;
-};
+import { isMuted } from "./kernel/types";
 
 export function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
@@ -37,7 +28,20 @@ export function ago(ts: number | null, now = Date.now()): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function page(title: string, body: string, extraHead = ""): string {
+export function liveStatus(enabled: number, status: string, mute_until?: number | null): string {
+  return isMuted(enabled, mute_until) ? "paused" : status;
+}
+
+export function muteValue(ms: number | null | undefined): string {
+  if (!ms) return "";
+  return new Date(ms).toISOString().slice(0, 16);
+}
+
+export function ghostLink(href: string, label: string): string {
+  return `<a class="btn ghost" href="${esc(href)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">${esc(label)}</a>`;
+}
+
+export function page(title: string, body: string, extraHead = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -151,122 +155,11 @@ function page(title: string, body: string, extraHead = ""): string {
 </html>`;
 }
 
-function liveStatus(enabled: number, status: string, mute_until?: number | null): string {
-  return isMuted(enabled, mute_until) ? "paused" : status;
-}
-
-function overallOf(monitors: Monitor[], jobs: Job[]): { overall: string; headline: string } {
-  const liveM = monitors.filter((m) => !isMuted(m.enabled, m.mute_until));
-  const liveJ = jobs.filter((j) => !isMuted(j.enabled, j.mute_until));
-  if (liveM.length === 0 && liveJ.length === 0) {
-    return { overall: "unknown", headline: "idle" };
-  }
-  const down =
-    liveM.filter((m) => m.status === "down").length +
-    liveJ.filter((j) => j.status === "down").length;
-  const known =
-    liveM.filter((m) => m.status !== "unknown").length +
-    liveJ.filter((j) => j.status !== "unknown").length;
-  if (down > 0) return { overall: "down", headline: `${down} down` };
-  if (known > 0) return { overall: "up", headline: "all systems up" };
-  return { overall: "unknown", headline: "waiting" };
-}
-
-export function statusPage(
-  title: string,
-  monitors: Monitor[],
-  jobs: Job[],
-  stats: Record<string, Stats>,
-  uptime24: { n: number; ok_n: number } | null,
-  incidents: Incident[],
-): string {
-  const { overall, headline } = overallOf(monitors, jobs);
-  const word = overall === "down" ? "down" : overall === "up" ? "up" : "idle";
-  const pct =
-    uptime24 && uptime24.n > 0
-      ? `${Math.round((uptime24.ok_n / uptime24.n) * 1000) / 10}% 24h`
-      : null;
-
-  const http = monitors.filter((m) => kindOf(m.url) === "http");
-  const ports = monitors.filter((m) => ["tcp", "udp", "icmp"].includes(kindOf(m.url)));
-  const records = monitors.filter((m) => ["dns", "ssl", "domain"].includes(kindOf(m.url)));
-  const row = (m: Monitor) => {
-    const st = stats[m.id];
-    const uptime = st && st.n > 0 ? `${Math.round((st.ok_n / st.n) * 1000) / 10}% 24h` : "—";
-    const lat = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : "—";
-    const muted = isMuted(m.enabled, m.mute_until);
-    const dot = liveStatus(m.enabled, m.status, m.mute_until);
-    return `<div class="row">
-              <div class="dot ${esc(dot)}"></div>
-              <div>
-                <div class="name">${esc(m.name)}${muted ? " · paused" : ""}</div>
-                <div class="url">${esc(m.url)}</div>
-              </div>
-              <div class="meta"><b>${esc(lat)}</b><br/>${esc(ago(m.last_check_at))} · ${esc(uptime)}</div>
-            </div>`;
-  };
-  const httpRows =
-    http.length === 0 ? "" : `<h2>http</h2><div class="list">${http.map(row).join("")}</div>`;
-  const portRows =
-    ports.length === 0 ? "" : `<h2>ports</h2><div class="list">${ports.map(row).join("")}</div>`;
-  const recordRows =
-    records.length === 0
-      ? ""
-      : `<h2>dns / ssl / domain</h2><div class="list">${records.map(row).join("")}</div>`;
-
-  const jobRows =
-    jobs.length === 0
-      ? ""
-      : `<h2>cron</h2><div class="list">${jobs
-          .map((j) => {
-            const muted = isMuted(j.enabled, j.mute_until);
-            const dot = liveStatus(j.enabled, j.status, j.mute_until);
-            return `<div class="row">
-              <div class="dot ${esc(dot)}"></div>
-              <div>
-                <div class="name">${esc(j.name)}${muted ? " · paused" : ""}</div>
-                <div class="url">heartbeat every ${j.interval_min}m · grace ${j.grace_min}m</div>
-              </div>
-              <div class="meta"><b>last beat</b><br/>${esc(ago(j.last_beat_at))}</div>
-            </div>`;
-          })
-          .join("")}</div>`;
-
-  const empty =
-    monitors.length === 0 && jobs.length === 0
-      ? `<p class="sub">Nothing watched yet. Add URLs or heartbeats at <a href="/admin">/admin</a>.</p>`
-      : "";
-  const incidentRows =
-    incidents.length === 0
-      ? `<p class="sub">No failed checks in the last 24h.</p>`
-      : `<div class="list">${incidents
-          .map(
-            (i) => `<div class="row">
-              <div class="dot down"></div>
-              <div>
-                <div class="name">${esc(i.name)}</div>
-                <div class="url">${esc(i.error ?? "fail")} · ${esc(i.url)}</div>
-              </div>
-              <div class="meta">${esc(ago(i.ts))}</div>
-            </div>`,
-          )
-          .join("")}</div>`;
-
-  return page(
-    `${title} · ${headline}`,
-    `<header>
-      <div class="brand">${esc(title)} <span>status</span></div>
-      <div class="led"><div class="dot ${overall}"></div>${esc(headline)}</div>
-    </header>
-    <h1 class="${overall}">${esc(word)}</h1>
-    ${pct ? `<p class="pct">${esc(pct)}</p>` : ""}
-    <p class="sub">HTTP, ports, DNS/SSL, and heartbeats. Last 24 hours in D1.</p>
-    ${empty}${httpRows}${portRows}${recordRows}${jobRows}
-    <h2>incidents</h2>
-    ${incidentRows}
-    <footer>indiestack · one project, one worker</footer>`,
-    `<meta http-equiv="refresh" content="30"/>`,
-  );
+export function html(body: string, status = 200, headers?: HeadersInit): Response {
+  return new Response(body, {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8", ...headers },
+  });
 }
 
 export function loginPage(title: string, error?: string): string {
@@ -314,109 +207,51 @@ export function revealPage(title: string, token: string): string {
   );
 }
 
+export function statusPage(
+  title: string,
+  overall: { overall: string; headline: string },
+  kicker: string | null,
+  sections: string[],
+  empty: boolean,
+): string {
+  const word = overall.overall === "down" ? "down" : overall.overall === "up" ? "up" : "idle";
+  const emptyHtml = empty
+    ? `<p class="sub">Nothing watched yet. Add URLs or heartbeats at <a href="/admin">/admin</a>.</p>`
+    : "";
+  return page(
+    `${title} · ${overall.headline}`,
+    `<header>
+      <div class="brand">${esc(title)} <span>status</span></div>
+      <div class="led"><div class="dot ${overall.overall}"></div>${esc(overall.headline)}</div>
+    </header>
+    <h1 class="${overall.overall}">${esc(word)}</h1>
+    ${kicker ? `<p class="pct">${esc(kicker)}</p>` : ""}
+    <p class="sub">Last 24 hours in D1.</p>
+    ${emptyHtml}${sections.join("")}
+    <footer>indiestack · one project, one worker</footer>`,
+    `<meta http-equiv="refresh" content="30"/>`,
+  );
+}
+
 export function adminPage(
   title: string,
-  origin: string,
-  monitors: Monitor[],
-  jobs: Job[],
-  sources: LogSource[],
+  sections: string[],
+  summaries: string[],
   webhook: string,
   rollups: string[],
+  footers: string[],
   flash?: string,
 ): string {
-  const list =
-    monitors.length === 0
-      ? `<p class="sub">No monitors. Add HTTP, TCP, UDP, or a host check below.</p>`
-      : monitors
-          .map((m) => {
-            const extra = [
-              kindOf(m.url),
-              m.keyword ? `keyword ${m.keyword_mode ?? "exists"} “${m.keyword}”` : "",
-              m.expect_status ? `status ${m.expect_status}` : "",
-              m.max_latency_ms ? `slow >${m.max_latency_ms}ms` : "",
-              m.last_error ?? "",
-            ]
-              .filter(Boolean)
-              .join(" · ");
-            const muted = isMuted(m.enabled, m.mute_until);
-            return `<div class="row">
-              <div class="dot ${esc(liveStatus(m.enabled, m.status, m.mute_until))}"></div>
-              <div>
-                <div class="name">${esc(m.name)} · every ${m.interval_min}m${muted ? " · paused" : ""}</div>
-                <div class="url">${esc(m.url)}${extra ? ` · ${esc(extra)}` : ""}</div>
-              </div>
-              <div class="actions">
-                <a class="btn ghost" href="/admin/monitors/${esc(m.id)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">edit</a>
-                <form method="post" action="/admin/monitors/${esc(m.id)}/toggle">
-                  <button class="ghost" type="submit">${m.enabled ? "pause" : "resume"}</button>
-                </form>
-                <form method="post" action="/admin/monitors/${esc(m.id)}/delete">
-                  <button class="danger" type="submit">remove</button>
-                </form>
-              </div>
-            </div>`;
-          })
-          .join("");
-
-  const jobList =
-    jobs.length === 0
-      ? `<p class="sub">No heartbeats. Your job should POST the URL we give you.</p>`
-      : jobs
-          .map((j) => {
-            const beat = `${origin}/beat/${j.token}`;
-            const muted = isMuted(j.enabled, j.mute_until);
-            return `<div class="row">
-              <div class="dot ${esc(liveStatus(j.enabled, j.status, j.mute_until))}"></div>
-              <div>
-                <div class="name">${esc(j.name)} · every ${j.interval_min}m + ${j.grace_min}m grace${muted ? " · paused" : ""}</div>
-                <div class="url">curl -fsS -X POST ${esc(beat)}</div>
-                <div class="url">last beat ${esc(ago(j.last_beat_at))}${j.last_error ? ` · ${esc(j.last_error)}` : ""}</div>
-              </div>
-              <div class="actions">
-                <a class="btn ghost" href="/admin/jobs/${esc(j.id)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">edit</a>
-                <form method="post" action="/admin/jobs/${esc(j.id)}/toggle">
-                  <button class="ghost" type="submit">${j.enabled ? "pause" : "resume"}</button>
-                </form>
-                <form method="post" action="/admin/jobs/${esc(j.id)}/delete">
-                  <button class="danger" type="submit">remove</button>
-                </form>
-              </div>
-            </div>`;
-          })
-          .join("");
-
-  const logList =
-    sources.length === 0
-      ? `<p class="sub">No log sources. POST errors here — not access logs. Kept 24h in R2.</p>`
-      : sources
-          .map((s) => {
-            const url = `${origin}/log/${s.token}`;
-            return `<div class="row">
-              <div class="dot ${s.enabled ? "up" : "paused"}"></div>
-              <div>
-                <div class="name">${esc(s.name)}${s.enabled ? "" : " · paused"}</div>
-                <div class="url">curl -fsS -X POST ${esc(url)} -H 'content-type: application/json' -d '{"level":"error","message":"…"}'</div>
-              </div>
-              <div class="actions">
-                <a class="btn ghost" href="/admin/logs/${esc(s.id)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">tail</a>
-                <form method="post" action="/admin/logs/${esc(s.id)}/toggle">
-                  <button class="ghost" type="submit">${s.enabled ? "pause" : "resume"}</button>
-                </form>
-                <form method="post" action="/admin/logs/${esc(s.id)}/delete">
-                  <button class="danger" type="submit">remove</button>
-                </form>
-              </div>
-            </div>`;
-          })
-          .join("");
-
   const history =
     rollups.length === 0
       ? `<p class="sub">Daily JSON land in R2 after midnight UTC.</p>`
       : `<ul>${rollups
           .map((d) => `<li><a href="/admin/rollups/${esc(d)}">${esc(d)}</a></li>`)
           .join("")}</ul>`;
-
+  const counts = summaries.length ? `${summaries.join(" · ")} · ` : "";
+  const footer = footers.length
+    ? footers.join(" ")
+    : "Mute times are UTC.";
   return page(
     `admin · ${title}`,
     `<header>
@@ -427,93 +262,8 @@ export function adminPage(
       </div>
     </header>
     ${flash ? `<p class="sub">${esc(flash)}</p>` : ""}
-    <p class="sub">${monitors.length}/20 monitors · ${jobs.length}/20 cron · ${sources.length}/10 logs · public <a href="/">/</a></p>
-    <h2>templates</h2>
-    <form class="card" method="post" action="/admin/templates">
-      <label>host
-        <input type="text" name="host" placeholder="example.com" required/>
-      </label>
-      <div class="tpl">
-        ${TEMPLATES.map(
-          (t) => `<button type="submit" name="id" value="${esc(t.id)}">${esc(t.label)}</button>`,
-        ).join("")}
-      </div>
-      <p class="sub" style="margin:12px 0 0">One host, one click. SSL uses Certificate Transparency (not the live edge cert). Host/UDP are TCP fallbacks.</p>
-    </form>
-    <h2>monitors</h2>
-    <div class="list">${list}</div>
-    <form class="card" method="post" action="/admin/monitors">
-      <label>type
-        <select name="kind">
-          <option value="http">HTTP(S)</option>
-          <option value="tcp">TCP port</option>
-          <option value="udp">UDP port (TCP probe — no datagrams on Workers)</option>
-          <option value="icmp">Host (TCP 443/80/22 — no ICMP on Workers)</option>
-          <option value="dns">DNS (DoH A/AAAA/MX)</option>
-          <option value="ssl">SSL expiry (~14d)</option>
-          <option value="domain">Domain expiry (~30d)</option>
-        </select>
-      </label>
-      <label>target
-        <input type="text" name="url" placeholder="https://example.com  or  example.com:22" required/>
-      </label>
-      <label>name (optional)
-        <input type="text" name="name" maxlength="40" placeholder="api"/>
-      </label>
-      <label>interval minutes
-        <input type="number" name="interval_min" min="1" max="60" value="5"/>
-      </label>
-      <label>expected status (0 = any 2xx)
-        <input type="number" name="expect_status" min="0" max="599" value="0"/>
-      </label>
-      <label>timeout ms
-        <input type="number" name="timeout_ms" min="1000" max="15000" value="8000"/>
-      </label>
-      <label>slow if slower than ms (0 = off)
-        <input type="number" name="max_latency_ms" min="0" max="15000" value="0"/>
-      </label>
-      <label>keyword (optional)
-        <input type="text" name="keyword" maxlength="80" placeholder="ok"/>
-      </label>
-      <label>keyword mode
-        <select name="keyword_mode">
-          <option value="exists">must contain</option>
-          <option value="absent">must not contain</option>
-        </select>
-      </label>
-      <label>headers (one Header: value per line, HTTP only)
-        <textarea name="headers" rows="3" placeholder="Authorization: Bearer …"></textarea>
-      </label>
-      <label>still-down nag minutes (0 = off)
-        <input type="number" name="nag_min" min="0" max="1440" value="0"/>
-      </label>
-      <label>mute until UTC
-        <input type="datetime-local" name="mute_until"/>
-      </label>
-      <button type="submit">add monitor</button>
-    </form>
-    <h2>cron monitor</h2>
-    <div class="list">${jobList}</div>
-    <form class="card" method="post" action="/admin/jobs">
-      <label>name
-        <input type="text" name="name" maxlength="40" placeholder="nightly-backup" required/>
-      </label>
-      <label>expect a beat every (minutes)
-        <input type="number" name="interval_min" min="1" max="1440" value="60"/>
-      </label>
-      <label>grace minutes
-        <input type="number" name="grace_min" min="0" max="120" value="2"/>
-      </label>
-      <button type="submit">add heartbeat</button>
-    </form>
-    <h2>logs</h2>
-    <div class="list">${logList}</div>
-    <form class="card" method="post" action="/admin/logs">
-      <label>name
-        <input type="text" name="name" maxlength="40" placeholder="api-errors" required/>
-      </label>
-      <button type="submit">add log source</button>
-    </form>
+    <p class="sub">${counts}public <a href="/">/</a></p>
+    ${sections.join("")}
     <form class="card" method="post" action="/admin/settings">
       <label>alert webhook (discord / slack / generic JSON)
         <input type="url" name="webhook_url" value="${esc(webhook)}" placeholder="https://discord.com/api/webhooks/…"/>
@@ -522,145 +272,17 @@ export function adminPage(
     </form>
     <h2>rollups</h2>
     ${history}
-    <footer>HTTP uses 2-strike alerts. A heartbeat alerts on the first miss after grace. Logs are admin-only, 8KB max, 24h in R2. Mute times are UTC.</footer>`,
+    <footer>${esc(footer)}</footer>`,
   );
 }
 
-export function logsPage(title: string, origin: string, source: LogSource, events: LogEvent[]): string {
-  const url = `${origin}/log/${source.token}`;
-  const rows =
-    events.length === 0
-      ? `<p class="sub">No events in the last 24h.</p>`
-      : `<div class="list">${events
-          .map((e) => {
-            const lvl = (e.level ?? "").toLowerCase();
-            return `<div class="row">
-              <div class="log-lvl ${esc(lvl)}">${esc(e.level ?? "log")}</div>
-              <div>
-                <div class="name">${esc(e.message)}</div>
-              </div>
-              <div class="meta">${esc(ago(e.ts))}</div>
-            </div>`;
-          })
-          .join("")}</div>`;
-  return page(
-    `logs · ${source.name}`,
-    `<header>
-      <div class="brand">${esc(title)} <span>logs</span></div>
-      <a href="/admin">back</a>
-    </header>
-    <h1 class="unknown">${esc(source.name)}</h1>
-    <p class="url">curl -fsS -X POST ${esc(url)} -H 'content-type: application/json' -d '{"level":"error","message":"…"}'</p>
-    <p class="sub">${source.enabled ? "live · last 50 · dropped after 24h" : "paused · ingest returns 404"}</p>
-    <h2>tail</h2>
-    ${rows}`,
-  );
-}
-
-function muteValue(ms: number | null | undefined): string {
-  if (!ms) return "";
-  return new Date(ms).toISOString().slice(0, 16);
-}
-
-export function editMonitorPage(title: string, m: Monitor): string {
-  const kind = kindOf(m.url);
-  return page(
-    `edit · ${m.name}`,
-    `<header>
-      <div class="brand">${esc(title)} <span>edit</span></div>
-      <a href="/admin">back</a>
-    </header>
-    <form class="card" method="post" action="/admin/monitors/${esc(m.id)}">
-      <label>name
-        <input type="text" name="name" maxlength="40" value="${esc(m.name)}" required/>
-      </label>
-      <label>type
-        <select name="kind">
-          ${["http", "tcp", "udp", "icmp", "dns", "ssl", "domain"]
-            .map(
-              (k) =>
-                `<option value="${k}"${k === kind ? " selected" : ""}>${k}</option>`,
-            )
-            .join("")}
-        </select>
-      </label>
-      <label>target
-        <input type="text" name="url" value="${esc(m.url)}" required/>
-      </label>
-      <label>interval minutes
-        <input type="number" name="interval_min" min="1" max="60" value="${m.interval_min}"/>
-      </label>
-      <label>expected status (HTTP, 0 = any 2xx)
-        <input type="number" name="expect_status" min="0" max="599" value="${m.expect_status}"/>
-      </label>
-      <label>timeout ms
-        <input type="number" name="timeout_ms" min="1000" max="15000" value="${m.timeout_ms}"/>
-      </label>
-      <label>slow if slower than ms (0 = off)
-        <input type="number" name="max_latency_ms" min="0" max="15000" value="${m.max_latency_ms ?? 0}"/>
-      </label>
-      <label>keyword
-        <input type="text" name="keyword" maxlength="80" value="${esc(m.keyword ?? "")}"/>
-      </label>
-      <label>keyword mode
-        <select name="keyword_mode">
-          <option value="exists"${m.keyword_mode !== "absent" ? " selected" : ""}>must contain</option>
-          <option value="absent"${m.keyword_mode === "absent" ? " selected" : ""}>must not contain</option>
-        </select>
-      </label>
-      <label>headers (one Header: value per line, HTTP only)
-        <textarea name="headers" rows="3" placeholder="Authorization: Bearer …">${esc(m.headers ?? "")}</textarea>
-      </label>
-      <label>still-down nag minutes (0 = off)
-        <input type="number" name="nag_min" min="0" max="1440" value="${m.nag_min ?? 0}"/>
-      </label>
-      <label>mute until UTC
-        <input type="datetime-local" name="mute_until" value="${esc(muteValue(m.mute_until))}"/>
-      </label>
-      <div class="actions">
-        <button type="submit">save</button>
-        <a href="/admin">cancel</a>
-      </div>
-    </form>`,
-  );
-}
-
-export function editJobPage(title: string, j: Job, origin: string): string {
-  const beat = `${origin}/beat/${j.token}`;
-  return page(
-    `edit · ${j.name}`,
-    `<header>
-      <div class="brand">${esc(title)} <span>edit</span></div>
-      <a href="/admin">back</a>
-    </header>
-    <p class="url">${esc(beat)}</p>
-    <form class="card" method="post" action="/admin/jobs/${esc(j.id)}">
-      <label>name
-        <input type="text" name="name" maxlength="40" value="${esc(j.name)}" required/>
-      </label>
-      <label>expect a beat every (minutes)
-        <input type="number" name="interval_min" min="1" max="1440" value="${j.interval_min}"/>
-      </label>
-      <label>grace minutes
-        <input type="number" name="grace_min" min="0" max="120" value="${j.grace_min}"/>
-      </label>
-      <label>still-down nag minutes (0 = off)
-        <input type="number" name="nag_min" min="0" max="1440" value="${j.nag_min ?? 0}"/>
-      </label>
-      <label>mute until UTC
-        <input type="datetime-local" name="mute_until" value="${esc(muteValue(j.mute_until))}"/>
-      </label>
-      <div class="actions">
-        <button type="submit">save</button>
-        <a href="/admin">cancel</a>
-      </div>
-    </form>`,
-  );
-}
-
-export function html(body: string, status = 200, headers?: HeadersInit): Response {
-  return new Response(body, {
-    status,
-    headers: { "content-type": "text/html; charset=utf-8", ...headers },
-  });
+export function overallOf(health: { up: number; down: number; unknown: number }): {
+  overall: string;
+  headline: string;
+} {
+  const n = health.up + health.down + health.unknown;
+  if (n === 0) return { overall: "unknown", headline: "idle" };
+  if (health.down > 0) return { overall: "down", headline: `${health.down} down` };
+  if (health.up > 0) return { overall: "up", headline: "all systems up" };
+  return { overall: "unknown", headline: "waiting" };
 }
