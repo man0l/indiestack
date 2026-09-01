@@ -37,7 +37,13 @@ export function adminLogs(sources: LogSource[], origin: string): string {
     </form>`;
 }
 
-export function logsPage(title: string, origin: string, source: LogSource, events: LogEvent[]): string {
+export function logsPage(
+  title: string,
+  origin: string,
+  source: LogSource,
+  events: LogEvent[],
+  analysis?: { text: string } | { error: string },
+): string {
   const url = `${origin}/log/${source.token}`;
   const rows =
     events.length === 0
@@ -54,6 +60,11 @@ export function logsPage(title: string, origin: string, source: LogSource, event
             </div>`;
           })
           .join("")}</div>`;
+  const analysisHtml = analysis
+    ? "error" in analysis
+      ? `<p class="err">${esc(analysis.error)}</p>`
+      : `<div class="card"><p class="sub" style="margin:0 0 8px">Workers AI</p><div class="url">${esc(analysis.text).replace(/\n/g, "<br/>")}</div></div>`
+    : "";
   return page(
     `logs · ${source.name}`,
     `<header>
@@ -63,6 +74,10 @@ export function logsPage(title: string, origin: string, source: LogSource, event
     <h1 class="unknown">${esc(source.name)}</h1>
     <p class="url">curl -fsS -X POST ${esc(url)} -H 'content-type: application/json' -d '{"level":"error","message":"…"}'</p>
     <p class="sub">${source.enabled ? "live · last 50 · dropped after 24h" : "paused · ingest returns 404"}</p>
+    <form method="post" action="/admin/logs/${esc(source.id)}/analyze" style="margin:12px 0">
+      <button type="submit"${events.length === 0 ? " disabled" : ""}>analyze with Workers AI</button>
+    </form>
+    ${analysisHtml}
     <h2>tail</h2>
     ${rows}`,
   );

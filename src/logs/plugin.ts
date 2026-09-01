@@ -1,6 +1,7 @@
 import { redirect, toggleEnabled } from "../kernel/http";
 import type { Plugin, RouteCtx, SectionCtx } from "../kernel/plugin";
 import { html } from "../ui";
+import { analyzeLogs } from "./analyze";
 import {
   MAX_LOG_SOURCES,
   deleteSourceLogs,
@@ -14,7 +15,7 @@ import { adminLogs, logsPage } from "./ui";
 
 export const logs: Plugin = {
   id: "logs",
-  adminFooter: "Logs are admin-only, 8KB max, 24h in R2.",
+  adminFooter: "Logs are admin-only, 8KB max, 24h in R2. Analyze uses Workers AI when you click the button.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM log_sources").first<{ n: number }>();
     return `${n?.n ?? 0}/10 logs`;
@@ -65,6 +66,14 @@ export const logs: Plugin = {
       await deleteSourceLogs(env, del[1]);
       await env.DB.prepare("DELETE FROM log_sources WHERE id = ?").bind(del[1]).run();
       return redirect("/admin?msg=removed");
+    }
+    const analyze = path.match(/^\/admin\/logs\/([^/]+)\/analyze$/);
+    if (analyze && method === "POST") {
+      const source = await getLogSource(env.DB, analyze[1]);
+      if (!source) return redirect("/admin?msg=not%20found");
+      const events = await listEvents(env, source.id);
+      const analysis = await analyzeLogs(env, source, events);
+      return html(logsPage(env.APP_NAME, origin, source, events, analysis));
     }
     const id = path.match(/^\/admin\/logs\/([^/]+)$/);
     if (id && method === "GET") {
