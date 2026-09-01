@@ -1,3 +1,5 @@
+import { connect } from "cloudflare:sockets";
+
 export const MAX_MONITORS = 20;
 export const MAX_JOBS = 20;
 const BATCH = 5;
@@ -5,6 +7,9 @@ const FAIL_ALERT_AFTER = 2;
 const HOT_MS = 24 * 60 * 60 * 1000;
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
 const BODY_CAP = 64 * 1024;
+const ICMP_PORTS = [443, 80, 22];
+
+export type Kind = "http" | "tcp" | "udp" | "icmp";
 
 export type Monitor = {
   id: string;
@@ -55,6 +60,47 @@ export type PingOpts = {
   keyword_mode?: string | null;
   max_latency_ms?: number | null;
 };
+
+export function kindOf(url: string): Kind {
+  if (url.startsWith("tcp:")) return "tcp";
+  if (url.startsWith("udp:")) return "udp";
+  if (url.startsWith("icmp:")) return "icmp";
+  return "http";
+}
+
+export function buildTarget(kind: string, raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (kind === "http") {
+    try {
+      const u = new URL(trimmed);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+      return u.toString();
+    } catch {
+      return null;
+    }
+  }
+  if (kind === "icmp") {
+    const host = trimmed.replace(/^icmp:\/\//i, "").replace(/\/$/, "");
+    if (!host || host.includes("://")) return null;
+    return `icmp://${host}`;
+  }
+  const hp = parseHostPort(trimmed.replace(/^(tcp|udp):\/\//i, ""));
+  if (!hp) return null;
+  if (hp.port === 25) return null;
+  if (kind === "udp") return `udp://${hp.hostname}:${hp.port}`;
+  return `tcp://${hp.hostname}:${hp.port}`;
+}
+
+function parseHostPort(raw: string): { hostname: string; port: number } | null {
+  const v6 = raw.match(/^\[([^\]]+)\]:(\d+)$/);
+  const v4 = raw.match(/^([^:/]+):(\d+)$/);
+  const m = v6 ?? v4;
+  if (!m) return null;
+  const port = Number(m[2]);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return { hostname: m[1], port };
+}
 
 export function expectedOk(status: number, expect: number): boolean {
   if (expect > 0) return status === expect;
@@ -111,6 +157,88 @@ export async function ping(opts: PingOpts): Promise<CheckResult> {
     };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+export async function probe(m: Monitor): Promise<CheckResult> {
+  const kind = kindOf(m.url);
+  if (kind === "http") {
+    return ping({
+      url: m.url,
+      timeout_ms: m.timeout_ms,
+      expect_status: m.expect_status,
+      keyword: m.keyword,
+      keyword_mode: m.keyword_mode,
+      max_latency_ms: m.max_latency_ms,
+    });
+  }
+  if (kind === "icmp") {
+    const host = m.url.replace(/^icmp:\/\//i, "").replace(/\/$/, "");
+    return icmpProbe(host, m.timeout_ms);
+  }
+  const hp = parseHostPort(m.url.replace(/^(tcp|udp):\/\//i, ""));
+  if (!hp) return { ok: false, status_code: null, latency_ms: 0, error: "bad host:port" };
+  const r = await tcpProbe(hp.hostname, hp.port, m.timeout_ms);
+  if (kind === "udp" && !r.ok) {
+    return {
+      ...r,
+      error: `${r.error ?? "fail"} · UDP via TCP (Workers have no datagrams)`,
+    };
+  }
+  return r;
+}
+
+async function icmpProbe(hostname: string, timeout_ms: number): Promise<CheckResult> {
+  let last: CheckResult = {
+    ok: false,
+    status_code: null,
+    latency_ms: 0,
+    error: "no TCP 443/80/22",
+  };
+  for (const port of ICMP_PORTS) {
+    last = await tcpProbe(hostname, port, timeout_ms);
+    if (last.ok) {
+      return { ...last, error: null, status_code: port };
+    }
+  }
+  return {
+    ...last,
+    error: `no ICMP on Workers; TCP 443/80/22 failed (${last.error ?? "down"})`,
+  };
+}
+
+async function tcpProbe(
+  hostname: string,
+  port: number,
+  timeout_ms: number,
+): Promise<CheckResult> {
+  if (port === 25) {
+    return { ok: false, status_code: 25, latency_ms: 0, error: "port 25 blocked by Workers" };
+  }
+  const t0 = Date.now();
+  let socket: Socket | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    socket = connect({ hostname, port }, { allowHalfOpen: false });
+    await Promise.race([
+      socket.opened,
+      new Promise<never>((_, rej) => {
+        timer = setTimeout(() => rej(new Error(`timeout ${timeout_ms}ms`)), timeout_ms);
+      }),
+    ]);
+    const latency_ms = Date.now() - t0;
+    await socket.close().catch(() => {});
+    return { ok: true, status_code: port, latency_ms, error: null };
+  } catch (err) {
+    await socket?.close().catch(() => {});
+    return {
+      ok: false,
+      status_code: null,
+      latency_ms: Date.now() - t0,
+      error: trunc(String(err), 200),
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -208,18 +336,7 @@ async function runPings(
 
   for (let i = 0; i < monitors.length; i += BATCH) {
     const slice = monitors.slice(i, i + BATCH);
-    const results = await Promise.all(
-      slice.map((m) =>
-        ping({
-          url: m.url,
-          timeout_ms: m.timeout_ms,
-          expect_status: m.expect_status,
-          keyword: m.keyword,
-          keyword_mode: m.keyword_mode,
-          max_latency_ms: m.max_latency_ms,
-        }),
-      ),
-    );
+    const results = await Promise.all(slice.map((m) => probe(m)));
 
     const stmts: D1PreparedStatement[] = [];
     const pendingAlerts: string[] = [];

@@ -1,4 +1,4 @@
-import type { Job, Monitor } from "./tick";
+import { kindOf, type Job, type Monitor } from "./tick";
 
 export type Stats = {
   n: number;
@@ -172,17 +172,14 @@ export function statusPage(
   const { overall, headline } = overallOf(monitors, jobs);
   const word = overall === "down" ? "down" : overall === "up" ? "up" : "idle";
 
-  const httpRows =
-    monitors.length === 0
-      ? ""
-      : `<h2>http</h2><div class="list">${monitors
-          .map((m) => {
-            const st = stats[m.id];
-            const uptime =
-              st && st.n > 0 ? `${Math.round((st.ok_n / st.n) * 1000) / 10}% 24h` : "—";
-            const lat = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : "—";
-            const dot = liveStatus(m.enabled, m.status);
-            return `<div class="row">
+  const http = monitors.filter((m) => kindOf(m.url) === "http");
+  const ports = monitors.filter((m) => kindOf(m.url) !== "http");
+  const row = (m: Monitor) => {
+    const st = stats[m.id];
+    const uptime = st && st.n > 0 ? `${Math.round((st.ok_n / st.n) * 1000) / 10}% 24h` : "—";
+    const lat = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : "—";
+    const dot = liveStatus(m.enabled, m.status);
+    return `<div class="row">
               <div class="dot ${esc(dot)}"></div>
               <div>
                 <div class="name">${esc(m.name)}${m.enabled ? "" : " · paused"}</div>
@@ -190,8 +187,11 @@ export function statusPage(
               </div>
               <div class="meta"><b>${esc(lat)}</b><br/>${esc(ago(m.last_check_at))} · ${esc(uptime)}</div>
             </div>`;
-          })
-          .join("")}</div>`;
+  };
+  const httpRows =
+    http.length === 0 ? "" : `<h2>http</h2><div class="list">${http.map(row).join("")}</div>`;
+  const portRows =
+    ports.length === 0 ? "" : `<h2>ports</h2><div class="list">${ports.map(row).join("")}</div>`;
 
   const jobRows =
     jobs.length === 0
@@ -223,7 +223,7 @@ export function statusPage(
     </header>
     <h1 class="${overall}">${esc(word)}</h1>
     <p class="sub">HTTP checks and job heartbeats. Last 24 hours in D1.</p>
-    ${empty}${httpRows}${jobRows}
+    ${empty}${httpRows}${portRows}${jobRows}
     <footer>indiestack · one project, one worker</footer>`,
     `<meta http-equiv="refresh" content="30"/>`,
   );
@@ -285,10 +285,11 @@ export function adminPage(
 ): string {
   const list =
     monitors.length === 0
-      ? `<p class="sub">No HTTP monitors. Add an HTTPS URL below.</p>`
+      ? `<p class="sub">No monitors. Add HTTP, TCP, UDP, or a host check below.</p>`
       : monitors
           .map((m) => {
             const extra = [
+              kindOf(m.url),
               m.keyword ? `keyword ${m.keyword_mode ?? "exists"} “${m.keyword}”` : "",
               m.expect_status ? `status ${m.expect_status}` : "",
               m.max_latency_ms ? `slow >${m.max_latency_ms}ms` : "",
@@ -356,12 +357,20 @@ export function adminPage(
       </div>
     </header>
     ${flash ? `<p class="sub">${esc(flash)}</p>` : ""}
-    <p class="sub">${monitors.length}/20 http · ${jobs.length}/20 cron · public <a href="/">/</a></p>
-    <h2>http</h2>
+    <p class="sub">${monitors.length}/20 monitors · ${jobs.length}/20 cron · public <a href="/">/</a></p>
+    <h2>monitors</h2>
     <div class="list">${list}</div>
     <form class="card" method="post" action="/admin/monitors">
-      <label>url
-        <input type="url" name="url" placeholder="https://example.com" required/>
+      <label>type
+        <select name="kind">
+          <option value="http">HTTP(S)</option>
+          <option value="tcp">TCP port</option>
+          <option value="udp">UDP port (TCP probe — no datagrams on Workers)</option>
+          <option value="icmp">Host (TCP 443/80/22 — no ICMP on Workers)</option>
+        </select>
+      </label>
+      <label>target
+        <input type="text" name="url" placeholder="https://example.com  or  example.com:22" required/>
       </label>
       <label>name (optional)
         <input type="text" name="name" maxlength="40" placeholder="api"/>

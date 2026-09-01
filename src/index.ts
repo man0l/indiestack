@@ -1,8 +1,9 @@
 import {
   MAX_JOBS,
   MAX_MONITORS,
+  buildTarget,
   getSetting,
-  ping,
+  probe,
   recordBeat,
   runTick,
   setSetting,
@@ -165,16 +166,24 @@ async function admin(env: Env, origin: string, msg: string | null): Promise<Resp
 
 async function addMonitor(request: Request, env: Env): Promise<Response> {
   const form = await request.formData();
+  const kind = String(form.get("kind") ?? "http");
   const rawUrl = String(form.get("url") ?? "").trim();
-  const parsed = parseHttpUrl(rawUrl);
-  if (!parsed) return redirect("/admin?msg=bad%20url");
+  const url = buildTarget(kind, rawUrl);
+  if (!url) {
+    return redirect(
+      kind === "tcp" || kind === "udp"
+        ? "/admin?msg=need%20host:port%20(not%20port%2025)"
+        : "/admin?msg=bad%20target",
+    );
+  }
 
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM monitors").first<{ n: number }>();
   if ((count?.n ?? 0) >= MAX_MONITORS) {
     return redirect("/admin?msg=max%2020%20monitors");
   }
 
-  const name = String(form.get("name") ?? "").trim() || parsed.host;
+  const hostish = url.replace(/^[a-z]+:\/\//, "").replace(/\/$/, "");
+  const name = String(form.get("name") ?? "").trim() || hostish.slice(0, 40);
   const interval = clamp(Number(form.get("interval_min") ?? 5), 1, 60);
   const expectStatus = clamp(Number(form.get("expect_status") ?? 0), 0, 599);
   const timeoutMs = clamp(Number(form.get("timeout_ms") ?? 8000), 1000, 15000);
@@ -191,14 +200,24 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
     : null;
   const id = crypto.randomUUID();
   const now = Date.now();
-  const url = parsed.toString();
-  const result = await ping({
+  const result = await probe({
+    id,
+    name: name.slice(0, 40),
     url,
-    timeout_ms: timeoutMs,
+    interval_min: interval,
     expect_status: expectStatus,
+    timeout_ms: timeoutMs,
     keyword,
     keyword_mode: keywordMode,
     max_latency_ms: maxLatency,
+    enabled: 1,
+    status: "unknown",
+    last_check_at: null,
+    last_status_code: null,
+    last_latency_ms: null,
+    last_error: null,
+    consecutive: 0,
+    created_at: now,
   });
   const status = result.ok ? "up" : "down";
   await env.DB.batch([
