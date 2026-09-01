@@ -30,6 +30,10 @@ export type Monitor = {
   last_error: string | null;
   consecutive: number;
   created_at: number;
+  mute_until: number | null;
+  headers: string | null;
+  nag_min: number;
+  last_nag_at: number | null;
 };
 
 export type Job = {
@@ -44,7 +48,40 @@ export type Job = {
   last_error: string | null;
   consecutive: number;
   created_at: number;
+  mute_until: number | null;
+  nag_min: number;
+  last_nag_at: number | null;
 };
+
+export type Incident = {
+  ts: number;
+  name: string;
+  url: string;
+  error: string | null;
+};
+
+export function isMuted(
+  enabled: number,
+  mute_until: number | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (!enabled) return true;
+  return mute_until != null && mute_until > now;
+}
+
+export function parseHeaders(raw: string | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw) return out;
+  for (const line of raw.split("\n")) {
+    const i = line.indexOf(":");
+    if (i < 1) continue;
+    const k = line.slice(0, i).trim();
+    const v = line.slice(i + 1).trim();
+    if (!k || k.toLowerCase() === "user-agent") continue;
+    out[k] = v;
+  }
+  return out;
+}
 
 export type CheckResult = {
   ok: boolean;
@@ -60,6 +97,7 @@ export type PingOpts = {
   keyword?: string | null;
   keyword_mode?: string | null;
   max_latency_ms?: number | null;
+  headers?: Record<string, string>;
 };
 
 export function kindOf(url: string): Kind {
@@ -133,7 +171,7 @@ export async function ping(opts: PingOpts): Promise<CheckResult> {
       method: "GET",
       redirect: "follow",
       signal: ac.signal,
-      headers: { "user-agent": "indiestack-ping/0.1" },
+      headers: { "user-agent": "indiestack-ping/0.1", ...opts.headers },
     });
     const latency_ms = Date.now() - t0;
     let body = "";
@@ -185,6 +223,7 @@ export async function probe(m: Monitor): Promise<CheckResult> {
       keyword: m.keyword,
       keyword_mode: m.keyword_mode,
       max_latency_ms: m.max_latency_ms,
+      headers: parseHeaders(m.headers),
     });
   }
   if (kind === "icmp") {
@@ -507,12 +546,12 @@ export async function recordBeat(
   const now = Date.now();
   const prev = job.status;
   await env.DB.prepare(
-    `UPDATE jobs SET status = 'up', last_beat_at = ?, last_error = NULL, consecutive = 0
+    `UPDATE jobs SET status = 'up', last_beat_at = ?, last_error = NULL, consecutive = 0, last_nag_at = NULL
      WHERE id = ?`,
   )
     .bind(now, job.id)
     .run();
-  if (prev === "down" && job.enabled) {
+  if (prev === "down" && job.enabled && !isMuted(job.enabled, job.mute_until, now)) {
     const webhook = await getSetting(env.DB, "webhook_url");
     if (webhook) {
       await sendAlert(webhook, `UP · ${job.name} · beat received`).catch((err) =>
@@ -531,11 +570,12 @@ async function runPings(
   const due = await env.DB.prepare(
     `SELECT * FROM monitors
      WHERE enabled = 1
+       AND (mute_until IS NULL OR mute_until <= ?)
        AND (last_check_at IS NULL OR last_check_at + interval_min * 60000 <= ?)
      ORDER BY last_check_at ASC
      LIMIT ?`,
   )
-    .bind(now, MAX_MONITORS)
+    .bind(now, now, MAX_MONITORS)
     .all<Monitor>();
 
   const monitors = due.results ?? [];
@@ -561,20 +601,32 @@ async function runPings(
            VALUES (?, ?, ?, ?, ?, ?)`,
         ).bind(m.id, now, r.ok ? 1 : 0, r.status_code, r.latency_ms, r.error),
       );
+      let lastNag = m.last_nag_at ?? null;
+      if (!r.ok && consecutive === FAIL_ALERT_AFTER) {
+        pendingAlerts.push(`DOWN · ${m.name} · ${m.url} · ${r.error ?? "fail"}`);
+        lastNag = now;
+      } else if (
+        !r.ok &&
+        next === "down" &&
+        prev === "down" &&
+        (m.nag_min ?? 0) > 0 &&
+        (lastNag == null || now - lastNag >= m.nag_min * 60000)
+      ) {
+        pendingAlerts.push(`STILL DOWN · ${m.name} · ${m.url} · ${r.error ?? "fail"}`);
+        lastNag = now;
+      } else if (r.ok && prev === "down") {
+        pendingAlerts.push(`UP · ${m.name} · ${m.url} · ${r.latency_ms}ms`);
+        lastNag = null;
+      }
+
       stmts.push(
         env.DB.prepare(
           `UPDATE monitors SET
              status = ?, last_check_at = ?, last_status_code = ?,
-             last_latency_ms = ?, last_error = ?, consecutive = ?
+             last_latency_ms = ?, last_error = ?, consecutive = ?, last_nag_at = ?
            WHERE id = ?`,
-        ).bind(next, now, r.status_code, r.latency_ms, r.error, consecutive, m.id),
+        ).bind(next, now, r.status_code, r.latency_ms, r.error, consecutive, lastNag, m.id),
       );
-
-      if (!r.ok && consecutive === FAIL_ALERT_AFTER) {
-        pendingAlerts.push(`DOWN · ${m.name} · ${m.url} · ${r.error ?? "fail"}`);
-      } else if (r.ok && prev === "down") {
-        pendingAlerts.push(`UP · ${m.name} · ${m.url} · ${r.latency_ms}ms`);
-      }
     }
 
     await env.DB.batch(stmts);
@@ -590,8 +642,10 @@ async function scanHeartbeats(
   webhook: string | null,
 ): Promise<{ scanned: number; alerts: number }> {
   const { results } = await env.DB.prepare(
-    "SELECT * FROM jobs WHERE enabled = 1",
-  ).all<Job>();
+    "SELECT * FROM jobs WHERE enabled = 1 AND (mute_until IS NULL OR mute_until <= ?)",
+  )
+    .bind(now)
+    .all<Job>();
   const jobs = results ?? [];
   const stmts: D1PreparedStatement[] = [];
   const pendingAlerts: string[] = [];
@@ -600,11 +654,21 @@ async function scanHeartbeats(
     const anchor = j.last_beat_at ?? j.created_at;
     const deadline = anchor + (j.interval_min + j.grace_min) * 60000;
     if (now < deadline) continue;
-    if (j.status === "down") continue;
+    const nagMin = j.nag_min ?? 0;
+    const lastNag = j.last_nag_at ?? null;
+    if (j.status === "down") {
+      if (nagMin > 0 && (lastNag == null || now - lastNag >= nagMin * 60000)) {
+        pendingAlerts.push(`STILL DOWN · ${j.name} · missed beat`);
+        stmts.push(
+          env.DB.prepare(`UPDATE jobs SET last_nag_at = ? WHERE id = ?`).bind(now, j.id),
+        );
+      }
+      continue;
+    }
     stmts.push(
       env.DB.prepare(
-        `UPDATE jobs SET status = 'down', last_error = ?, consecutive = 1 WHERE id = ?`,
-      ).bind("missed beat", j.id),
+        `UPDATE jobs SET status = 'down', last_error = ?, consecutive = 1, last_nag_at = ? WHERE id = ?`,
+      ).bind("missed beat", now, j.id),
     );
     pendingAlerts.push(
       `DOWN · ${j.name} · missed beat (every ${j.interval_min}m, last ${agoMs(anchor, now)})`,

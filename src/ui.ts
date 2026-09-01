@@ -1,5 +1,5 @@
 import { TEMPLATES } from "./templates";
-import { kindOf, type Job, type Monitor } from "./tick";
+import { isMuted, kindOf, type Incident, type Job, type Monitor } from "./tick";
 
 export type Stats = {
   n: number;
@@ -86,6 +86,7 @@ function page(title: string, body: string, extraHead = ""): string {
     h1.up { color: var(--up); }
     h1.down { color: var(--down); }
     h1.unknown { color: var(--wait); }
+    .pct { font-size: 18px; color: var(--mute); margin: 0 0 8px; font-variant-numeric: tabular-nums; }
     .sub { color: var(--mute); margin-bottom: 28px; }
     h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); font-weight: 650; margin: 28px 0 0; }
     .list { border-top: 1px solid var(--line); }
@@ -109,7 +110,7 @@ function page(title: string, body: string, extraHead = ""): string {
       margin: 16px 0;
     }
     label { display: block; font-size: 12px; color: var(--mute); margin-bottom: 10px; }
-    input[type=text], input[type=url], input[type=password], input[type=number], select {
+    input[type=text], input[type=url], input[type=password], input[type=number], input[type=datetime-local], select, textarea {
       width: 100%;
       margin-top: 4px;
       padding: 8px 10px;
@@ -145,13 +146,13 @@ function page(title: string, body: string, extraHead = ""): string {
 </html>`;
 }
 
-function liveStatus(enabled: number, status: string): string {
-  return enabled ? status : "paused";
+function liveStatus(enabled: number, status: string, mute_until?: number | null): string {
+  return isMuted(enabled, mute_until) ? "paused" : status;
 }
 
 function overallOf(monitors: Monitor[], jobs: Job[]): { overall: string; headline: string } {
-  const liveM = monitors.filter((m) => m.enabled);
-  const liveJ = jobs.filter((j) => j.enabled);
+  const liveM = monitors.filter((m) => !isMuted(m.enabled, m.mute_until));
+  const liveJ = jobs.filter((j) => !isMuted(j.enabled, j.mute_until));
   if (liveM.length === 0 && liveJ.length === 0) {
     return { overall: "unknown", headline: "idle" };
   }
@@ -171,9 +172,15 @@ export function statusPage(
   monitors: Monitor[],
   jobs: Job[],
   stats: Record<string, Stats>,
+  uptime24: { n: number; ok_n: number } | null,
+  incidents: Incident[],
 ): string {
   const { overall, headline } = overallOf(monitors, jobs);
   const word = overall === "down" ? "down" : overall === "up" ? "up" : "idle";
+  const pct =
+    uptime24 && uptime24.n > 0
+      ? `${Math.round((uptime24.ok_n / uptime24.n) * 1000) / 10}% 24h`
+      : null;
 
   const http = monitors.filter((m) => kindOf(m.url) === "http");
   const ports = monitors.filter((m) => ["tcp", "udp", "icmp"].includes(kindOf(m.url)));
@@ -182,11 +189,12 @@ export function statusPage(
     const st = stats[m.id];
     const uptime = st && st.n > 0 ? `${Math.round((st.ok_n / st.n) * 1000) / 10}% 24h` : "—";
     const lat = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : "—";
-    const dot = liveStatus(m.enabled, m.status);
+    const muted = isMuted(m.enabled, m.mute_until);
+    const dot = liveStatus(m.enabled, m.status, m.mute_until);
     return `<div class="row">
               <div class="dot ${esc(dot)}"></div>
               <div>
-                <div class="name">${esc(m.name)}${m.enabled ? "" : " · paused"}</div>
+                <div class="name">${esc(m.name)}${muted ? " · paused" : ""}</div>
                 <div class="url">${esc(m.url)}</div>
               </div>
               <div class="meta"><b>${esc(lat)}</b><br/>${esc(ago(m.last_check_at))} · ${esc(uptime)}</div>
@@ -206,11 +214,12 @@ export function statusPage(
       ? ""
       : `<h2>cron</h2><div class="list">${jobs
           .map((j) => {
-            const dot = liveStatus(j.enabled, j.status);
+            const muted = isMuted(j.enabled, j.mute_until);
+            const dot = liveStatus(j.enabled, j.status, j.mute_until);
             return `<div class="row">
               <div class="dot ${esc(dot)}"></div>
               <div>
-                <div class="name">${esc(j.name)}${j.enabled ? "" : " · paused"}</div>
+                <div class="name">${esc(j.name)}${muted ? " · paused" : ""}</div>
                 <div class="url">heartbeat every ${j.interval_min}m · grace ${j.grace_min}m</div>
               </div>
               <div class="meta"><b>last beat</b><br/>${esc(ago(j.last_beat_at))}</div>
@@ -222,6 +231,21 @@ export function statusPage(
     monitors.length === 0 && jobs.length === 0
       ? `<p class="sub">Nothing watched yet. Add URLs or heartbeats at <a href="/admin">/admin</a>.</p>`
       : "";
+  const incidentRows =
+    incidents.length === 0
+      ? `<p class="sub">No failed checks in the last 24h.</p>`
+      : `<div class="list">${incidents
+          .map(
+            (i) => `<div class="row">
+              <div class="dot down"></div>
+              <div>
+                <div class="name">${esc(i.name)}</div>
+                <div class="url">${esc(i.error ?? "fail")} · ${esc(i.url)}</div>
+              </div>
+              <div class="meta">${esc(ago(i.ts))}</div>
+            </div>`,
+          )
+          .join("")}</div>`;
 
   return page(
     `${title} · ${headline}`,
@@ -230,8 +254,11 @@ export function statusPage(
       <div class="led"><div class="dot ${overall}"></div>${esc(headline)}</div>
     </header>
     <h1 class="${overall}">${esc(word)}</h1>
-    <p class="sub">HTTP checks and job heartbeats. Last 24 hours in D1.</p>
+    ${pct ? `<p class="pct">${esc(pct)}</p>` : ""}
+    <p class="sub">HTTP, ports, DNS/SSL, and heartbeats. Last 24 hours in D1.</p>
     ${empty}${httpRows}${portRows}${recordRows}${jobRows}
+    <h2>incidents</h2>
+    ${incidentRows}
     <footer>indiestack · one project, one worker</footer>`,
     `<meta http-equiv="refresh" content="30"/>`,
   );
@@ -305,13 +332,15 @@ export function adminPage(
             ]
               .filter(Boolean)
               .join(" · ");
+            const muted = isMuted(m.enabled, m.mute_until);
             return `<div class="row">
-              <div class="dot ${esc(liveStatus(m.enabled, m.status))}"></div>
+              <div class="dot ${esc(liveStatus(m.enabled, m.status, m.mute_until))}"></div>
               <div>
-                <div class="name">${esc(m.name)} · every ${m.interval_min}m${m.enabled ? "" : " · paused"}</div>
+                <div class="name">${esc(m.name)} · every ${m.interval_min}m${muted ? " · paused" : ""}</div>
                 <div class="url">${esc(m.url)}${extra ? ` · ${esc(extra)}` : ""}</div>
               </div>
               <div class="actions">
+                <a class="btn ghost" href="/admin/monitors/${esc(m.id)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">edit</a>
                 <form method="post" action="/admin/monitors/${esc(m.id)}/toggle">
                   <button class="ghost" type="submit">${m.enabled ? "pause" : "resume"}</button>
                 </form>
@@ -329,14 +358,16 @@ export function adminPage(
       : jobs
           .map((j) => {
             const beat = `${origin}/beat/${j.token}`;
+            const muted = isMuted(j.enabled, j.mute_until);
             return `<div class="row">
-              <div class="dot ${esc(liveStatus(j.enabled, j.status))}"></div>
+              <div class="dot ${esc(liveStatus(j.enabled, j.status, j.mute_until))}"></div>
               <div>
-                <div class="name">${esc(j.name)} · every ${j.interval_min}m + ${j.grace_min}m grace${j.enabled ? "" : " · paused"}</div>
+                <div class="name">${esc(j.name)} · every ${j.interval_min}m + ${j.grace_min}m grace${muted ? " · paused" : ""}</div>
                 <div class="url">curl -fsS -X POST ${esc(beat)}</div>
                 <div class="url">last beat ${esc(ago(j.last_beat_at))}${j.last_error ? ` · ${esc(j.last_error)}` : ""}</div>
               </div>
               <div class="actions">
+                <a class="btn ghost" href="/admin/jobs/${esc(j.id)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">edit</a>
                 <form method="post" action="/admin/jobs/${esc(j.id)}/toggle">
                   <button class="ghost" type="submit">${j.enabled ? "pause" : "resume"}</button>
                 </form>
@@ -443,7 +474,108 @@ export function adminPage(
     </form>
     <h2>rollups</h2>
     ${history}
-    <footer>HTTP uses 2-strike alerts. A heartbeat alerts on the first miss after grace.</footer>`,
+    <footer>HTTP uses 2-strike alerts. A heartbeat alerts on the first miss after grace. Mute times are UTC.</footer>`,
+  );
+}
+
+function muteValue(ms: number | null | undefined): string {
+  if (!ms) return "";
+  return new Date(ms).toISOString().slice(0, 16);
+}
+
+export function editMonitorPage(title: string, m: Monitor): string {
+  const kind = kindOf(m.url);
+  return page(
+    `edit · ${m.name}`,
+    `<header>
+      <div class="brand">${esc(title)} <span>edit</span></div>
+      <a href="/admin">back</a>
+    </header>
+    <form class="card" method="post" action="/admin/monitors/${esc(m.id)}">
+      <label>name
+        <input type="text" name="name" maxlength="40" value="${esc(m.name)}" required/>
+      </label>
+      <label>type
+        <select name="kind">
+          ${["http", "tcp", "udp", "icmp", "dns", "ssl", "domain"]
+            .map(
+              (k) =>
+                `<option value="${k}"${k === kind ? " selected" : ""}>${k}</option>`,
+            )
+            .join("")}
+        </select>
+      </label>
+      <label>target
+        <input type="text" name="url" value="${esc(m.url)}" required/>
+      </label>
+      <label>interval minutes
+        <input type="number" name="interval_min" min="1" max="60" value="${m.interval_min}"/>
+      </label>
+      <label>expected status (HTTP, 0 = any 2xx)
+        <input type="number" name="expect_status" min="0" max="599" value="${m.expect_status}"/>
+      </label>
+      <label>timeout ms
+        <input type="number" name="timeout_ms" min="1000" max="15000" value="${m.timeout_ms}"/>
+      </label>
+      <label>slow if slower than ms (0 = off)
+        <input type="number" name="max_latency_ms" min="0" max="15000" value="${m.max_latency_ms ?? 0}"/>
+      </label>
+      <label>keyword
+        <input type="text" name="keyword" maxlength="80" value="${esc(m.keyword ?? "")}"/>
+      </label>
+      <label>keyword mode
+        <select name="keyword_mode">
+          <option value="exists"${m.keyword_mode !== "absent" ? " selected" : ""}>must contain</option>
+          <option value="absent"${m.keyword_mode === "absent" ? " selected" : ""}>must not contain</option>
+        </select>
+      </label>
+      <label>headers (one Header: value per line, HTTP only)
+        <textarea name="headers" rows="3" placeholder="Authorization: Bearer …">${esc(m.headers ?? "")}</textarea>
+      </label>
+      <label>still-down nag minutes (0 = off)
+        <input type="number" name="nag_min" min="0" max="1440" value="${m.nag_min ?? 0}"/>
+      </label>
+      <label>mute until UTC
+        <input type="datetime-local" name="mute_until" value="${esc(muteValue(m.mute_until))}"/>
+      </label>
+      <div class="actions">
+        <button type="submit">save</button>
+        <a href="/admin">cancel</a>
+      </div>
+    </form>`,
+  );
+}
+
+export function editJobPage(title: string, j: Job, origin: string): string {
+  const beat = `${origin}/beat/${j.token}`;
+  return page(
+    `edit · ${j.name}`,
+    `<header>
+      <div class="brand">${esc(title)} <span>edit</span></div>
+      <a href="/admin">back</a>
+    </header>
+    <p class="url">${esc(beat)}</p>
+    <form class="card" method="post" action="/admin/jobs/${esc(j.id)}">
+      <label>name
+        <input type="text" name="name" maxlength="40" value="${esc(j.name)}" required/>
+      </label>
+      <label>expect a beat every (minutes)
+        <input type="number" name="interval_min" min="1" max="1440" value="${j.interval_min}"/>
+      </label>
+      <label>grace minutes
+        <input type="number" name="grace_min" min="0" max="120" value="${j.grace_min}"/>
+      </label>
+      <label>still-down nag minutes (0 = off)
+        <input type="number" name="nag_min" min="0" max="1440" value="${j.nag_min ?? 0}"/>
+      </label>
+      <label>mute until UTC
+        <input type="datetime-local" name="mute_until" value="${esc(muteValue(j.mute_until))}"/>
+      </label>
+      <div class="actions">
+        <button type="submit">save</button>
+        <a href="/admin">cancel</a>
+      </div>
+    </form>`,
   );
 }
 

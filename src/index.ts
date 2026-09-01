@@ -3,16 +3,20 @@ import {
   MAX_MONITORS,
   buildTarget,
   getSetting,
+  kindOf,
   probe,
   recordBeat,
   runTick,
   setSetting,
+  type Incident,
   type Job,
   type Monitor,
 } from "./tick";
 import {
   adminPage,
   ago,
+  editJobPage,
+  editMonitorPage,
   html,
   loginPage,
   revealPage,
@@ -92,6 +96,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (monDel && method === "POST") {
       return deleteMonitor(monDel[1], env);
     }
+    const monId = path.match(/^\/admin\/monitors\/([^/]+)$/);
+    if (monId && method === "GET") return showEditMonitor(monId[1], env);
+    if (monId && method === "POST") return updateMonitor(monId[1], request, env);
     if (path === "/admin/jobs" && method === "POST") {
       return addJob(request, env);
     }
@@ -103,6 +110,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (jobDel && method === "POST") {
       return deleteJob(jobDel[1], env);
     }
+    const jobId = path.match(/^\/admin\/jobs\/([^/]+)$/);
+    if (jobId && method === "GET") return showEditJob(jobId[1], env, url.origin);
+    if (jobId && method === "POST") return updateJob(jobId[1], request, env);
     if (path === "/admin/settings" && method === "POST") {
       return saveSettings(request, env);
     }
@@ -151,7 +161,27 @@ async function status(env: Env): Promise<Response> {
       avg_latency_ms: row.avg_latency_ms,
     };
   }
-  return html(statusPage(env.APP_NAME, monitors, jobs, stats));
+  const since = Date.now() - 24 * 60 * 60 * 1000;
+  const uptimeRow = await env.DB.prepare(
+    "SELECT COUNT(*) AS n, SUM(ok) AS ok_n FROM checks WHERE ts >= ?",
+  )
+    .bind(since)
+    .first<{ n: number; ok_n: number | null }>();
+  const uptime24 =
+    uptimeRow && Number(uptimeRow.n) > 0
+      ? { n: Number(uptimeRow.n), ok_n: Number(uptimeRow.ok_n) || 0 }
+      : null;
+  const inc = await env.DB.prepare(
+    `SELECT c.ts, c.error, m.name, m.url
+     FROM checks c JOIN monitors m ON m.id = c.monitor_id
+     WHERE c.ok = 0 AND c.ts >= ?
+     ORDER BY c.ts DESC LIMIT 12`,
+  )
+    .bind(since)
+    .all<Incident>();
+  return html(
+    statusPage(env.APP_NAME, monitors, jobs, stats, uptime24, inc.results ?? []),
+  );
 }
 
 async function admin(env: Env, origin: string, msg: string | null): Promise<Response> {
@@ -222,6 +252,10 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
     last_error: null,
     consecutive: 0,
     created_at: now,
+    mute_until: null,
+    headers: null,
+    nag_min: 0,
+    last_nag_at: null,
   });
 }
 
@@ -250,6 +284,10 @@ async function addTemplate(request: Request, env: Env): Promise<Response> {
     last_error: null,
     consecutive: 0,
     created_at: now,
+    mute_until: null,
+    headers: null,
+    nag_min: 0,
+    last_nag_at: null,
   });
 }
 
@@ -261,8 +299,9 @@ async function saveMonitor(env: Env, m: Monitor): Promise<Response> {
       `INSERT INTO monitors (
          id, name, url, interval_min, expect_status, timeout_ms,
          keyword, keyword_mode, max_latency_ms, created_at, status, last_check_at,
-         last_status_code, last_latency_ms, last_error, consecutive
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+         last_status_code, last_latency_ms, last_error, consecutive,
+         mute_until, headers, nag_min
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).bind(
       m.id,
       m.name,
@@ -279,6 +318,9 @@ async function saveMonitor(env: Env, m: Monitor): Promise<Response> {
       result.status_code,
       result.latency_ms,
       result.error,
+      m.mute_until ?? null,
+      m.headers ?? null,
+      m.nag_min ?? 0,
     ),
     env.DB.prepare(
       `INSERT INTO checks (monitor_id, ts, ok, status_code, latency_ms, error)
@@ -400,6 +442,84 @@ function generateToken(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+async function showEditMonitor(id: string, env: Env): Promise<Response> {
+  const m = await env.DB.prepare("SELECT * FROM monitors WHERE id = ?").bind(id).first<Monitor>();
+  if (!m) return redirect("/admin?msg=not%20found");
+  return html(editMonitorPage(env.APP_NAME, m));
+}
+
+async function updateMonitor(id: string, request: Request, env: Env): Promise<Response> {
+  const existing = await env.DB.prepare("SELECT * FROM monitors WHERE id = ?")
+    .bind(id)
+    .first<Monitor>();
+  if (!existing) return redirect("/admin?msg=not%20found");
+  const form = await request.formData();
+  const kind = String(form.get("kind") ?? kindOf(existing.url));
+  const url = buildTarget(kind, String(form.get("url") ?? existing.url));
+  if (!url) return redirect(`/admin/monitors/${id}?err=bad`);
+  const name = String(form.get("name") ?? existing.name).trim().slice(0, 40) || existing.name;
+  const keyword = String(form.get("keyword") ?? "").trim().slice(0, 80) || null;
+  await env.DB.prepare(
+    `UPDATE monitors SET
+       name = ?, url = ?, interval_min = ?, expect_status = ?, timeout_ms = ?,
+       max_latency_ms = ?, keyword = ?, keyword_mode = ?, headers = ?,
+       nag_min = ?, mute_until = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      name,
+      url,
+      clamp(Number(form.get("interval_min") ?? existing.interval_min), 1, 60),
+      clamp(Number(form.get("expect_status") ?? existing.expect_status), 0, 599),
+      clamp(Number(form.get("timeout_ms") ?? existing.timeout_ms), 1000, 15000),
+      Number(form.get("max_latency_ms") ?? 0) > 0
+        ? clamp(Number(form.get("max_latency_ms")), 1, 15000)
+        : null,
+      keyword,
+      keyword ? (String(form.get("keyword_mode")) === "absent" ? "absent" : "exists") : null,
+      String(form.get("headers") ?? "").trim() || null,
+      clamp(Number(form.get("nag_min") ?? 0), 0, 1440),
+      parseMuteUntil(String(form.get("mute_until") ?? "")),
+      id,
+    )
+    .run();
+  return redirect("/admin?msg=saved");
+}
+
+async function showEditJob(id: string, env: Env, origin: string): Promise<Response> {
+  const j = await env.DB.prepare("SELECT * FROM jobs WHERE id = ?").bind(id).first<Job>();
+  if (!j) return redirect("/admin?msg=not%20found");
+  return html(editJobPage(env.APP_NAME, j, origin));
+}
+
+async function updateJob(id: string, request: Request, env: Env): Promise<Response> {
+  const existing = await env.DB.prepare("SELECT * FROM jobs WHERE id = ?").bind(id).first<Job>();
+  if (!existing) return redirect("/admin?msg=not%20found");
+  const form = await request.formData();
+  const name = String(form.get("name") ?? existing.name).trim().slice(0, 40) || existing.name;
+  await env.DB.prepare(
+    `UPDATE jobs SET name = ?, interval_min = ?, grace_min = ?, nag_min = ?, mute_until = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      name,
+      clamp(Number(form.get("interval_min") ?? existing.interval_min), 1, 1440),
+      clamp(Number(form.get("grace_min") ?? existing.grace_min), 0, 120),
+      clamp(Number(form.get("nag_min") ?? 0), 0, 1440),
+      parseMuteUntil(String(form.get("mute_until") ?? "")),
+      id,
+    )
+    .run();
+  return redirect("/admin?msg=saved");
+}
+
+function parseMuteUntil(raw: string): number | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const t = Date.parse(s.endsWith("Z") ? s : `${s}Z`);
+  return Number.isFinite(t) ? t : null;
+}
+
 async function listMonitors(env: Env): Promise<Monitor[]> {
   const { results } = await env.DB.prepare(
     "SELECT * FROM monitors ORDER BY created_at ASC",
@@ -415,17 +535,22 @@ async function listJobs(env: Env): Promise<Job[]> {
 }
 
 async function health(env: Env): Promise<{ up: number; down: number; unknown: number }> {
+  const now = Date.now();
   const row = await env.DB.prepare(
     `SELECT
        SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) AS up,
        SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) AS down,
        SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) AS unknown
      FROM (
-       SELECT status FROM monitors WHERE enabled = 1
+       SELECT status FROM monitors
+       WHERE enabled = 1 AND (mute_until IS NULL OR mute_until <= ?)
        UNION ALL
-       SELECT status FROM jobs WHERE enabled = 1
+       SELECT status FROM jobs
+       WHERE enabled = 1 AND (mute_until IS NULL OR mute_until <= ?)
      ) AS live`,
-  ).first<{ up: number; down: number; unknown: number }>();
+  )
+    .bind(now, now)
+    .first<{ up: number; down: number; unknown: number }>();
   return {
     up: Number(row?.up) || 0,
     down: Number(row?.down) || 0,
