@@ -1,3 +1,4 @@
+import { TEMPLATES } from "./templates";
 import { kindOf, type Job, type Monitor } from "./tick";
 
 export type Stats = {
@@ -126,6 +127,8 @@ function page(title: string, body: string, extraHead = ""): string {
     button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
     button.danger { background: transparent; color: var(--down); border: 1px solid var(--line); }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .tpl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .tpl button { background: var(--card); color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
     .err { color: var(--down); margin: 0 0 16px; }
     footer { margin-top: 36px; color: var(--mute); font-size: 12px; }
     @media (max-width: 560px) {
@@ -173,7 +176,8 @@ export function statusPage(
   const word = overall === "down" ? "down" : overall === "up" ? "up" : "idle";
 
   const http = monitors.filter((m) => kindOf(m.url) === "http");
-  const ports = monitors.filter((m) => kindOf(m.url) !== "http");
+  const ports = monitors.filter((m) => ["tcp", "udp", "icmp"].includes(kindOf(m.url)));
+  const records = monitors.filter((m) => ["dns", "ssl", "domain"].includes(kindOf(m.url)));
   const row = (m: Monitor) => {
     const st = stats[m.id];
     const uptime = st && st.n > 0 ? `${Math.round((st.ok_n / st.n) * 1000) / 10}% 24h` : "—";
@@ -192,6 +196,10 @@ export function statusPage(
     http.length === 0 ? "" : `<h2>http</h2><div class="list">${http.map(row).join("")}</div>`;
   const portRows =
     ports.length === 0 ? "" : `<h2>ports</h2><div class="list">${ports.map(row).join("")}</div>`;
+  const recordRows =
+    records.length === 0
+      ? ""
+      : `<h2>dns / ssl / domain</h2><div class="list">${records.map(row).join("")}</div>`;
 
   const jobRows =
     jobs.length === 0
@@ -223,7 +231,7 @@ export function statusPage(
     </header>
     <h1 class="${overall}">${esc(word)}</h1>
     <p class="sub">HTTP checks and job heartbeats. Last 24 hours in D1.</p>
-    ${empty}${httpRows}${portRows}${jobRows}
+    ${empty}${httpRows}${portRows}${recordRows}${jobRows}
     <footer>indiestack · one project, one worker</footer>`,
     `<meta http-equiv="refresh" content="30"/>`,
   );
@@ -358,6 +366,18 @@ export function adminPage(
     </header>
     ${flash ? `<p class="sub">${esc(flash)}</p>` : ""}
     <p class="sub">${monitors.length}/20 monitors · ${jobs.length}/20 cron · public <a href="/">/</a></p>
+    <h2>templates</h2>
+    <form class="card" method="post" action="/admin/templates">
+      <label>host
+        <input type="text" name="host" placeholder="example.com" required/>
+      </label>
+      <div class="tpl">
+        ${TEMPLATES.map(
+          (t) => `<button type="submit" name="id" value="${esc(t.id)}">${esc(t.label)}</button>`,
+        ).join("")}
+      </div>
+      <p class="sub" style="margin:12px 0 0">One host, one click. SSL uses Certificate Transparency (not the live edge cert). Host/UDP are TCP fallbacks.</p>
+    </form>
     <h2>monitors</h2>
     <div class="list">${list}</div>
     <form class="card" method="post" action="/admin/monitors">
@@ -367,6 +387,9 @@ export function adminPage(
           <option value="tcp">TCP port</option>
           <option value="udp">UDP port (TCP probe — no datagrams on Workers)</option>
           <option value="icmp">Host (TCP 443/80/22 — no ICMP on Workers)</option>
+          <option value="dns">DNS (DoH A/AAAA/MX)</option>
+          <option value="ssl">SSL expiry (~14d)</option>
+          <option value="domain">Domain expiry (~30d)</option>
         </select>
       </label>
       <label>target

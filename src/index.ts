@@ -19,6 +19,7 @@ import {
   statusPage,
   type Stats,
 } from "./ui";
+import { applyTemplate } from "./templates";
 
 const COOKIE = "indie_admin";
 
@@ -79,6 +80,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     if (path === "/admin/monitors" && method === "POST") {
       return addMonitor(request, env);
+    }
+    if (path === "/admin/templates" && method === "POST") {
+      return addTemplate(request, env);
     }
     const monToggle = path.match(/^\/admin\/monitors\/([^/]+)\/toggle$/);
     if (monToggle && method === "POST") {
@@ -200,7 +204,7 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
     : null;
   const id = crypto.randomUUID();
   const now = Date.now();
-  const result = await probe({
+  return saveMonitor(env, {
     id,
     name: name.slice(0, 40),
     url,
@@ -219,6 +223,38 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
     consecutive: 0,
     created_at: now,
   });
+}
+
+async function addTemplate(request: Request, env: Env): Promise<Response> {
+  const form = await request.formData();
+  const applied = applyTemplate(String(form.get("id") ?? ""), String(form.get("host") ?? ""));
+  if (!applied) return redirect("/admin?msg=need%20a%20host");
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM monitors").first<{ n: number }>();
+  if ((count?.n ?? 0) >= MAX_MONITORS) return redirect("/admin?msg=max%2020%20monitors");
+  const now = Date.now();
+  return saveMonitor(env, {
+    id: crypto.randomUUID(),
+    name: applied.name,
+    url: applied.url,
+    interval_min: applied.interval_min,
+    expect_status: 0,
+    timeout_ms: applied.timeout_ms,
+    keyword: null,
+    keyword_mode: null,
+    max_latency_ms: null,
+    enabled: 1,
+    status: "unknown",
+    last_check_at: null,
+    last_status_code: null,
+    last_latency_ms: null,
+    last_error: null,
+    consecutive: 0,
+    created_at: now,
+  });
+}
+
+async function saveMonitor(env: Env, m: Monitor): Promise<Response> {
+  const result = await probe(m);
   const status = result.ok ? "up" : "down";
   await env.DB.batch([
     env.DB.prepare(
@@ -228,18 +264,18 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
          last_status_code, last_latency_ms, last_error, consecutive
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
     ).bind(
-      id,
-      name.slice(0, 40),
-      url,
-      interval,
-      expectStatus,
-      timeoutMs,
-      keyword,
-      keywordMode,
-      maxLatency,
-      now,
+      m.id,
+      m.name,
+      m.url,
+      m.interval_min,
+      m.expect_status,
+      m.timeout_ms,
+      m.keyword,
+      m.keyword_mode,
+      m.max_latency_ms,
+      m.created_at,
       status,
-      now,
+      Date.now(),
       result.status_code,
       result.latency_ms,
       result.error,
@@ -247,9 +283,9 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
     env.DB.prepare(
       `INSERT INTO checks (monitor_id, ts, ok, status_code, latency_ms, error)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).bind(id, now, result.ok ? 1 : 0, result.status_code, result.latency_ms, result.error),
+    ).bind(m.id, Date.now(), result.ok ? 1 : 0, result.status_code, result.latency_ms, result.error),
   ]);
-  return redirect("/admin?msg=added");
+  return redirect(`/admin?msg=${encodeURIComponent(`added ${m.name}`)}`);
 }
 
 async function addJob(request: Request, env: Env): Promise<Response> {

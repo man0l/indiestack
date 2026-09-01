@@ -9,7 +9,9 @@ const PRUNE_EVERY_MS = 60 * 60 * 1000;
 const BODY_CAP = 64 * 1024;
 const ICMP_PORTS = [443, 80, 22];
 
-export type Kind = "http" | "tcp" | "udp" | "icmp";
+export type Kind = "http" | "tcp" | "udp" | "icmp" | "dns" | "ssl" | "domain";
+const SSL_DAYS = 14;
+const DOMAIN_DAYS = 30;
 
 export type Monitor = {
   id: string;
@@ -65,6 +67,9 @@ export function kindOf(url: string): Kind {
   if (url.startsWith("tcp:")) return "tcp";
   if (url.startsWith("udp:")) return "udp";
   if (url.startsWith("icmp:")) return "icmp";
+  if (url.startsWith("dns:")) return "dns";
+  if (url.startsWith("ssl:")) return "ssl";
+  if (url.startsWith("domain:")) return "domain";
   return "http";
 }
 
@@ -73,17 +78,28 @@ export function buildTarget(kind: string, raw: string): string | null {
   if (!trimmed) return null;
   if (kind === "http") {
     try {
-      const u = new URL(trimmed);
+      const u = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
       if (u.protocol !== "http:" && u.protocol !== "https:") return null;
       return u.toString();
     } catch {
       return null;
     }
   }
-  if (kind === "icmp") {
-    const host = trimmed.replace(/^icmp:\/\//i, "").replace(/\/$/, "");
-    if (!host || host.includes("://")) return null;
-    return `icmp://${host}`;
+  if (kind === "icmp" || kind === "ssl" || kind === "domain") {
+    const host = trimmed
+      .replace(/^(icmp|ssl|domain):\/\//i, "")
+      .replace(/\/$/, "")
+      .split("/")[0];
+    if (!host || host.includes("://") || host.includes(" ")) return null;
+    return `${kind}://${host}`;
+  }
+  if (kind === "dns") {
+    const body = trimmed.replace(/^dns:\/\//i, "");
+    const [hostPart, typePart] = body.split("/");
+    const host = hostPart?.trim();
+    const type = (typePart ?? "A").trim().toUpperCase() || "A";
+    if (!host || !/^[A-Z0-9]+$/.test(type)) return null;
+    return `dns://${host}/${type}`;
   }
   const hp = parseHostPort(trimmed.replace(/^(tcp|udp):\/\//i, ""));
   if (!hp) return null;
@@ -176,6 +192,11 @@ export async function probe(m: Monitor): Promise<CheckResult> {
     const host = m.url.replace(/^icmp:\/\//i, "").replace(/\/$/, "");
     return icmpProbe(host, m.timeout_ms);
   }
+  if (kind === "dns") return dnsProbe(m.url, m.timeout_ms);
+  if (kind === "ssl") return sslProbe(m.url.replace(/^ssl:\/\//i, "").replace(/\/$/, ""), m.timeout_ms);
+  if (kind === "domain") {
+    return domainProbe(m.url.replace(/^domain:\/\//i, "").replace(/\/$/, ""), m.timeout_ms);
+  }
   const hp = parseHostPort(m.url.replace(/^(tcp|udp):\/\//i, ""));
   if (!hp) return { ok: false, status_code: null, latency_ms: 0, error: "bad host:port" };
   const r = await tcpProbe(hp.hostname, hp.port, m.timeout_ms);
@@ -186,6 +207,153 @@ export async function probe(m: Monitor): Promise<CheckResult> {
     };
   }
   return r;
+}
+
+async function dnsProbe(url: string, timeout_ms: number): Promise<CheckResult> {
+  const t0 = Date.now();
+  const body = url.replace(/^dns:\/\//i, "");
+  const [host, typeRaw] = body.split("/");
+  const type = (typeRaw ?? "A").toUpperCase();
+  if (!host) return { ok: false, status_code: null, latency_ms: 0, error: "bad dns target" };
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeout_ms);
+  try {
+    const res = await fetch(
+      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${encodeURIComponent(type)}`,
+      {
+        headers: { accept: "application/dns-json", "user-agent": "indiestack-ping/0.1" },
+        signal: ac.signal,
+      },
+    );
+    const json = (await res.json()) as { Status?: number; Answer?: unknown[] };
+    const latency_ms = Date.now() - t0;
+    const status = json.Status ?? -1;
+    if (status === 3) return { ok: false, status_code: status, latency_ms, error: "NXDOMAIN" };
+    if (status !== 0) return { ok: false, status_code: status, latency_ms, error: `dns status ${status}` };
+    const n = json.Answer?.length ?? 0;
+    if (n === 0) return { ok: false, status_code: 0, latency_ms, error: `no ${type} records` };
+    return { ok: true, status_code: n, latency_ms, error: null };
+  } catch (err) {
+    return failErr(err, t0, timeout_ms);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sslProbe(host: string, timeout_ms: number): Promise<CheckResult> {
+  const t0 = Date.now();
+  const live = await tlsLive(host, timeout_ms);
+  if (!live.ok) return live;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeout_ms);
+  try {
+    const res = await fetch(
+      `https://crt.sh/?Identity=${encodeURIComponent(host)}&exclude=expired&output=json`,
+      { headers: { "user-agent": "indiestack-ping/0.1" }, signal: ac.signal },
+    );
+    const text = await readCapped(res.body ?? new ReadableStream(), 200_000);
+    const parsed = JSON.parse(text) as
+      | { not_after?: string; common_name?: string; name_value?: string }
+      | Array<{ not_after?: string; common_name?: string; name_value?: string }>;
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    const hostLower = host.toLowerCase();
+    let latest = 0;
+    for (const row of rows) {
+      const names = `${row.common_name ?? ""} ${row.name_value ?? ""}`.toLowerCase();
+      if (!names.includes(hostLower)) continue;
+      const t = Date.parse(row.not_after ?? "");
+      if (t > latest) latest = t;
+    }
+    const latency_ms = Date.now() - t0;
+    if (!latest) {
+      return { ok: true, status_code: live.status_code, latency_ms, error: null };
+    }
+    const days = Math.floor((latest - Date.now()) / 86400000);
+    if (days < SSL_DAYS) {
+      return { ok: false, status_code: days, latency_ms, error: `ssl expires in ${days}d` };
+    }
+    return { ok: true, status_code: days, latency_ms, error: null };
+  } catch (err) {
+    if (live.ok) return { ...live, error: null };
+    return failErr(err, t0, timeout_ms);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function domainProbe(host: string, timeout_ms: number): Promise<CheckResult> {
+  const t0 = Date.now();
+  const tld = host.split(".").pop() ?? "";
+  const urls = [`https://rdap.org/domain/${encodeURIComponent(host)}`];
+  if (tld === "com" || tld === "net") {
+    urls.unshift(`https://rdap.verisign.com/${tld}/v1/domain/${encodeURIComponent(host)}`);
+  }
+  let lastErr = "rdap failed";
+  for (const url of urls) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeout_ms);
+    try {
+      const res = await fetch(url, {
+        headers: { accept: "application/rdap+json, application/json", "user-agent": "indiestack-ping/0.1" },
+        signal: ac.signal,
+        redirect: "follow",
+      });
+      if (!res.ok) {
+        lastErr = `rdap ${res.status}`;
+        if (res.body) await res.body.cancel();
+        continue;
+      }
+      const json = (await res.json()) as {
+        events?: Array<{ eventAction?: string; eventDate?: string }>;
+      };
+      const exp = json.events?.find((e) => (e.eventAction ?? "").toLowerCase().includes("expir"));
+      const when = exp?.eventDate ? Date.parse(exp.eventDate) : NaN;
+      const latency_ms = Date.now() - t0;
+      if (!Number.isFinite(when)) {
+        return { ok: false, status_code: null, latency_ms, error: "no expiration in rdap" };
+      }
+      const days = Math.floor((when - Date.now()) / 86400000);
+      if (days < DOMAIN_DAYS) {
+        return { ok: false, status_code: days, latency_ms, error: `domain expires in ${days}d` };
+      }
+      return { ok: true, status_code: days, latency_ms, error: null };
+    } catch (err) {
+      lastErr = trunc(String(err), 200);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return { ok: false, status_code: null, latency_ms: Date.now() - t0, error: lastErr };
+}
+
+async function tlsLive(host: string, timeout_ms: number): Promise<CheckResult> {
+  const t0 = Date.now();
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeout_ms);
+  try {
+    const res = await fetch(`https://${host}/`, {
+      method: "GET",
+      redirect: "follow",
+      signal: ac.signal,
+      headers: { "user-agent": "indiestack-ping/0.1" },
+    });
+    if (res.body) await res.body.cancel();
+    return { ok: true, status_code: res.status, latency_ms: Date.now() - t0, error: null };
+  } catch (err) {
+    return failErr(err, t0, timeout_ms);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function failErr(err: unknown, t0: number, timeout_ms: number): CheckResult {
+  const aborted = err instanceof Error && err.name === "AbortError";
+  return {
+    ok: false,
+    status_code: null,
+    latency_ms: Date.now() - t0,
+    error: aborted ? `timeout ${timeout_ms}ms` : trunc(String(err), 200),
+  };
 }
 
 async function icmpProbe(hostname: string, timeout_ms: number): Promise<CheckResult> {
