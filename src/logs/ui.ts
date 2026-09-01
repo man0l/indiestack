@@ -1,5 +1,5 @@
-import { ago, esc, ghostLink, page } from "../ui";
-import type { LogEvent, LogSource } from "./index";
+import { esc, ghostLink } from "../ui";
+import type { LogSource } from "./index";
 
 export function adminLogs(sources: LogSource[], origin: string): string {
   const logList =
@@ -15,7 +15,7 @@ export function adminLogs(sources: LogSource[], origin: string): string {
                 <div class="url">curl -fsS -X POST ${esc(url)} -H 'content-type: application/json' -d '{"level":"error","message":"…"}'</div>
               </div>
               <div class="actions">
-                ${ghostLink(`/admin/logs/${s.id}`, "tail")}
+                ${ghostLink(`/admin/logs/${s.id}`, "open")}
                 <form method="post" action="/admin/logs/${esc(s.id)}/toggle">
                   <button class="ghost" type="submit">${s.enabled ? "pause" : "resume"}</button>
                 </form>
@@ -28,6 +28,7 @@ export function adminLogs(sources: LogSource[], origin: string): string {
           .join("");
 
   return `<h2>logs</h2>
+    <p class="sub" style="margin:8px 0 0"><a href="/admin/logs">log manager</a> — filter, search, expand, tail.</p>
     <div class="list">${logList}</div>
     <form class="card" method="post" action="/admin/logs">
       <label>name
@@ -35,50 +36,4 @@ export function adminLogs(sources: LogSource[], origin: string): string {
       </label>
       <button type="submit">add log source</button>
     </form>`;
-}
-
-export function logsPage(
-  title: string,
-  origin: string,
-  source: LogSource,
-  events: LogEvent[],
-  analysis?: { text: string } | { error: string },
-): string {
-  const url = `${origin}/log/${source.token}`;
-  const rows =
-    events.length === 0
-      ? `<p class="sub">No events in the last 24h.</p>`
-      : `<div class="list">${events
-          .map((e) => {
-            const lvl = (e.level ?? "").toLowerCase();
-            return `<div class="row">
-              <div class="log-lvl ${esc(lvl)}">${esc(e.level ?? "log")}</div>
-              <div>
-                <div class="name">${esc(e.message)}</div>
-              </div>
-              <div class="meta">${esc(ago(e.ts))}</div>
-            </div>`;
-          })
-          .join("")}</div>`;
-  const analysisHtml = analysis
-    ? "error" in analysis
-      ? `<p class="err">${esc(analysis.error)}</p>`
-      : `<div class="card"><p class="sub" style="margin:0 0 8px">Workers AI</p><div class="url">${esc(analysis.text).replace(/\n/g, "<br/>")}</div></div>`
-    : "";
-  return page(
-    `logs · ${source.name}`,
-    `<header>
-      <div class="brand">${esc(title)} <span>logs</span></div>
-      <a href="/admin">back</a>
-    </header>
-    <h1 class="unknown">${esc(source.name)}</h1>
-    <p class="url">curl -fsS -X POST ${esc(url)} -H 'content-type: application/json' -d '{"level":"error","message":"…"}'</p>
-    <p class="sub">${source.enabled ? "live · last 50 · dropped after 24h" : "paused · ingest returns 404"}</p>
-    <form method="post" action="/admin/logs/${esc(source.id)}/analyze" style="margin:12px 0">
-      <button type="submit"${events.length === 0 ? " disabled" : ""}>analyze with Workers AI</button>
-    </form>
-    ${analysisHtml}
-    <h2>tail</h2>
-    ${rows}`,
-  );
 }

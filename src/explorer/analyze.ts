@@ -1,10 +1,10 @@
-import type { LogEvent, LogSource } from "./index";
+import type { LogEvent } from "../logs/index";
 
 const MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
 export async function analyzeLogs(
   env: Env,
-  source: LogSource,
+  label: string,
   events: LogEvent[],
 ): Promise<{ text: string } | { error: string }> {
   if (events.length === 0) return { error: "No events in the last 24h." };
@@ -25,7 +25,7 @@ export async function analyzeLogs(
         },
         {
           role: "user",
-          content: `Source: ${source.name}\nLast ${Math.min(events.length, 50)} events, newest first:\n${lines}`,
+          content: `Source: ${label}\nLast ${Math.min(events.length, 50)} events, newest first:\n${lines}`,
         },
       ],
       max_tokens: 400,
@@ -35,7 +35,8 @@ export async function analyzeLogs(
     if (!text) return { error: "Empty model response." };
     return { text };
   } catch (err) {
-    return { error: trunc(String(err), 200) };
+    const s = String(err);
+    return { error: s.length <= 200 ? s : `${s.slice(0, 200)}…` };
   }
 }
 
@@ -48,8 +49,4 @@ function extractText(out: unknown): string {
   const content = choices?.[0]?.message?.content;
   if (typeof content === "string") return content;
   return "";
-}
-
-function trunc(s: string, n: number): string {
-  return s.length <= n ? s : `${s.slice(0, n)}…`;
 }

@@ -101,6 +101,32 @@ export async function listEvents(env: Env, sourceId: string, limit = TAIL): Prom
   return out;
 }
 
+export async function hydrateEvents(env: Env, events: LogEvent[]): Promise<LogEvent[]> {
+  const out: LogEvent[] = [];
+  for (let i = 0; i < events.length; i += 10) {
+    const slice = events.slice(i, i + 10);
+    const loaded = await Promise.all(
+      slice.map(async (e) => {
+        const obj = await env.BUCKET.get(e.key);
+        if (!obj) return e;
+        try {
+          const json = (await obj.json()) as Partial<LogEvent>;
+          return {
+            ...e,
+            level: json.level ?? e.level,
+            message: json.message || e.message,
+            data: json.data ?? json,
+          };
+        } catch {
+          return e;
+        }
+      }),
+    );
+    out.push(...loaded);
+  }
+  return out;
+}
+
 export async function deleteSourceLogs(env: Env, sourceId: string): Promise<void> {
   let cursor: string | undefined;
   let n = 0;
