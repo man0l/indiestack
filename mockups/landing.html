@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>IndieStack — skip the monitoring paywall. $120 once.</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23c8f542'/%3E%3C/svg%3E"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&family=Syne:wght@600;700;800&family=Unbounded:wght@500;600&display=swap" rel="stylesheet"/>
+  <style>
+    /* Stronger system
+       Display  Instrument Serif  — hero, price, close (Resend / Chronicle)
+       Title    Syne              — h2, brand, kill cards
+       Body     IBM Plex Sans
+       Mono     IBM Plex Mono     — ticker, code, labels
+       Number   Unbounded         — $408 / $120 / $528
+       Floor    perspective lime grid + grain + spotlight */
+    :root {
+      --bg: #030303;
+      --elev: #0a0a0b;
+      --card: #111113;
+      --ink: #f3f1ea;
+      --mute: #8d8b86;
+      --line: rgba(243,241,234,0.09);
+      --line-strong: rgba(243,241,234,0.16);
+      --accent: #c8f542;
+      --accent-ink: #10140a;
+      --up: #3ee08f;
+      --down: #ff5d57;
+      --serif: "Instrument Serif", "Times New Roman", serif;
+      --display: Syne, ui-sans-serif, sans-serif;
+      --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --num: Unbounded, Syne, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; overflow-x: hidden; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.5 var(--sans);
+      overflow-x: hidden;
+    }
+    .grain, .vignette, .spot {
+      pointer-events: none; position: fixed; inset: 0; z-index: 40;
+    }
+    .grain { opacity: 0.07; mix-blend-mode: overlay; }
+    .vignette {
+      z-index: 2;
+      background: radial-gradient(120% 80% at 50% 0%, transparent 30%, #030303 88%);
+    }
+    .spot {
+      z-index: 0;
+      background:
+        radial-gradient(ellipse 70% 45% at 50% -10%, #c8f5421c, transparent 55%),
+        radial-gradient(ellipse 40% 30% at 80% 20%, #3ee08f0d, transparent 50%);
+    }
+    a { color: var(--ink); text-decoration: none; }
+    a:hover { color: #fff; }
+    .wrap { width: min(1180px, calc(100% - 48px)); margin: 0 auto; position: relative; z-index: 3; }
+    nav {
+      position: sticky; top: 14px; z-index: 50;
+      display: flex; justify-content: center; padding: 0 16px;
+    }
+    nav .bar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 20px; width: min(1180px, 100%);
+      padding: 8px 8px 8px 18px;
+      background: rgba(8,8,9,0.7);
+      backdrop-filter: blur(18px) saturate(1.2);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+    }
+    .brand {
+      font-family: var(--display); font-weight: 700; letter-spacing: -0.04em;
+      display: flex; align-items: center; gap: 9px; font-size: 15px;
+    }
+    .mark {
+      width: 10px; height: 10px; border-radius: 99px; background: var(--accent);
+      box-shadow: 0 0 18px #c8f542aa;
+    }
+    .nav-links { display: flex; gap: 26px; font-size: 13px; }
+    .nav-links a { color: var(--mute); font-family: var(--mono); letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; }
+    .nav-links a:hover { color: var(--ink); }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 999px; border: 1px solid transparent;
+      padding: 11px 18px; font-weight: 600; letter-spacing: -0.02em;
+      cursor: pointer; text-decoration: none !important; font-size: 14px;
+      font-family: var(--sans);
+    }
+    .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 32px #c8f54233; }
+    .btn.primary:hover { filter: brightness(1.07); color: var(--accent-ink); }
+    .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+    .btn.ghost:hover { background: #ffffff0a; }
+    .btn.lg { padding: 15px 24px; font-size: 15px; }
+    .ticker {
+      overflow: hidden; margin-top: 16px; position: relative; z-index: 3;
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      color: var(--mute); font: 11px/1 var(--mono); letter-spacing: 0.16em;
+      text-transform: uppercase; white-space: nowrap;
+    }
+    .ticker-track { display: inline-flex; gap: 40px; padding: 11px 0; animation: marquee 48s linear infinite; }
+    .ticker b { color: var(--down); font-weight: 500; }
+    @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+    .hero {
+      position: relative; z-index: 3;
+      min-height: 62vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-end;
+      text-align: center; padding: 72px 0 0;
+    }
+    .floor {
+      position: absolute; left: 50%; bottom: -8%;
+      width: 180%; height: 58%;
+      transform: translateX(-50%) perspective(520px) rotateX(64deg);
+      background-image:
+        linear-gradient(#c8f54222 1px, transparent 1px),
+        linear-gradient(90deg, #c8f54222 1px, transparent 1px);
+      background-size: 56px 56px;
+      mask-image: linear-gradient(#000, transparent 78%);
+      pointer-events: none; z-index: 0;
+    }
+    .kicker {
+      display: inline-flex; align-items: center; gap: 8px;
+      border: 1px solid var(--line-strong); border-radius: 999px;
+      padding: 7px 14px 7px 10px; font: 11px/1 var(--mono);
+      letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute);
+      background: #ffffff06;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--up); box-shadow: 0 0 12px var(--up); }
+    h1 {
+      margin: 28px 0 18px;
+      font-family: var(--serif); font-weight: 400;
+      font-size: clamp(48px, 8.2vw, 96px);
+      line-height: 0.92; letter-spacing: -0.035em;
+      max-width: 22ch;
+    }
+    h1 em { font-style: italic; color: var(--accent); }
+    .lede { font-size: 18px; color: var(--mute); max-width: 38rem; margin: 0 auto; }
+    .lede strong { color: var(--ink); font-weight: 600; }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 32px 0 18px; justify-content: center; }
+    .fine { font-size: 13px; color: var(--mute); }
+
+    .product { padding: 36px 0 20px; position: relative; z-index: 3; }
+    .glow {
+      position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%);
+      width: 80%; height: 280px;
+      background: radial-gradient(ellipse, #c8f54228, transparent 68%);
+      filter: blur(12px); pointer-events: none;
+    }
+    .chrome {
+      position: relative;
+      background: linear-gradient(180deg, #141416, #0a0a0b);
+      border: 1px solid var(--line-strong);
+      border-radius: 18px; overflow: hidden;
+      box-shadow: 0 50px 140px #000e, 0 0 0 1px #c8f54214, 0 0 80px #c8f54214;
+    }
+    .chrome-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 11px 14px; border-bottom: 1px solid var(--line);
+      background: #080809;
+    }
+    .traffic { display: flex; gap: 6px; }
+    .traffic i { width: 9px; height: 9px; border-radius: 50%; display: block; background: #2a2a2e; }
+    .traffic i:nth-child(1) { background: #ff5f57; }
+    .traffic i:nth-child(2) { background: #febc2e; }
+    .traffic i:nth-child(3) { background: #28c840; }
+    .urlbar {
+      flex: 1; text-align: center; font: 12px/1 var(--mono); color: var(--mute);
+      background: #ffffff08; border-radius: 8px; padding: 6px 10px;
+    }
+    .screen-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 18px 20px 10px;
+    }
+    .screen-head strong { font-family: var(--display); letter-spacing: -0.04em; }
+    .pill {
+      font: 11px/1 var(--mono); color: var(--up); background: #3ee08f14;
+      border: 1px solid #3ee08f33; padding: 6px 10px; border-radius: 999px;
+      letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .row {
+      display: grid; grid-template-columns: 14px 1fr auto auto auto;
+      gap: 12px; align-items: center; padding: 12px 20px;
+      border-top: 1px solid var(--line); font-size: 13px;
+    }
+    .led { width: 8px; height: 8px; border-radius: 50%; }
+    .led.up { background: var(--up); box-shadow: 0 0 8px #3ee08f88; }
+    .led.down { background: var(--down); }
+    .name { font-weight: 500; }
+    .url, .ms { color: var(--mute); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12px; }
+
+    .math {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      margin: 48px 0 80px; position: relative; z-index: 3;
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    }
+    .stat { padding: 28px 22px 26px; border-right: 1px solid var(--line); }
+    .stat:last-child { border-right: 0; }
+    .stat .tag {
+      font: 11px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--mute); display: block; margin-bottom: 10px;
+    }
+    .stat .n {
+      font-family: var(--num); font-size: clamp(28px, 4vw, 44px);
+      font-weight: 500; letter-spacing: -0.05em; line-height: 1;
+    }
+    .stat .n.save { color: var(--accent); }
+    .stat .l { color: var(--mute); font-size: 13px; margin-top: 10px; }
+
+    section { padding: 36px 0 24px; position: relative; z-index: 3; }
+    h2 {
+      font-family: var(--display); font-weight: 700;
+      font-size: clamp(30px, 4.2vw, 52px);
+      letter-spacing: -0.05em; margin: 0 0 12px; line-height: 1.02;
+    }
+    .sub { color: var(--mute); max-width: 40rem; margin: 0 0 32px; }
+    .qs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; }
+    .q {
+      background: var(--elev); padding: 32px 28px; min-height: 240px;
+      position: relative;
+    }
+    .q em {
+      font-family: var(--num); font-style: normal; font-size: 42px;
+      color: #ffffff0f; position: absolute; right: 18px; top: 8px; letter-spacing: -0.06em;
+    }
+    .q .tag { font: 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+    .q h3 { margin: 14px 0 10px; font-family: var(--display); font-size: 26px; letter-spacing: -0.04em; }
+    .q p { margin: 0; color: var(--mute); font-size: 15px; }
+
+    .bento {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 12px;
+    }
+    .feat, .limits {
+      background: var(--elev); border: 1px solid var(--line); border-radius: 18px; padding: 24px;
+    }
+    .feat.big { grid-row: span 2; background:
+      linear-gradient(180deg, #16180f, #0a0a0b);
+      border-color: #c8f54233;
+    }
+    .feat b { display: block; font-family: var(--display); font-size: 22px; letter-spacing: -0.04em; margin-bottom: 8px; }
+    .feat span { color: var(--mute); font-size: 14px; }
+    .feat .ben { display: block; margin-top: 10px; color: var(--ink); opacity: 0.88; }
+    .limits { grid-column: 2 / -1; }
+    .limits h3 { margin: 0 0 12px; font-family: var(--display); font-size: 16px; }
+    .limits table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .limits td { padding: 10px 0; border-top: 1px solid var(--line); vertical-align: top; }
+    .limits td:first-child { color: var(--mute); width: 40%; font-family: var(--mono); font-size: 12px; }
+
+    .kills { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .kill {
+      background: var(--elev); border: 1px solid var(--line); border-radius: 16px;
+      padding: 20px 18px; min-height: 200px; display: flex; flex-direction: column;
+    }
+    .kill .was {
+      font-family: var(--num); font-size: 22px; color: #6a6864;
+      position: relative; display: inline-block;
+    }
+    .kill .was::after {
+      content: ""; position: absolute; left: -2px; right: -2px; top: 52%;
+      height: 2px; background: var(--down); transform: rotate(-12deg);
+    }
+    .kill h3 { font-family: var(--display); font-size: 16px; letter-spacing: -0.03em; margin: 10px 0 8px; }
+    .kill p { color: var(--mute); font-size: 13px; margin: 0; flex: 1; }
+    .kill .fit { margin-top: 14px; font: 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+    .kill .fit.yes { color: var(--up); }
+    .kill .fit.no { color: var(--mute); }
+
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; position: relative; }
+    .steps::before {
+      content: ""; position: absolute; top: 22px; left: 12%; right: 12%;
+      height: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+    .step { padding: 0 18px; }
+    .num {
+      width: 44px; height: 44px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: var(--bg); border: 1px solid var(--accent);
+      color: var(--accent); font-family: var(--num); font-size: 14px;
+      position: relative; z-index: 1;
+    }
+    .step h3 { font-family: var(--display); margin: 18px 0 8px; letter-spacing: -0.04em; }
+    .honest { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .box { border-radius: 18px; padding: 28px; border: 1px solid var(--line); }
+    .keep { background: linear-gradient(180deg, #0d1812, #0a0a0b); }
+    .skip { background: linear-gradient(180deg, #1a0e0e, #0a0a0b); }
+    .box h3 { font-family: var(--display); margin: 0 0 10px; }
+    .box p { color: var(--mute); margin: 0; }
+
+    .price-wrap { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 14px; align-items: stretch; }
+    .receipt, .buy { border: 1px solid var(--line); border-radius: 22px; padding: 32px; background: var(--elev); }
+    .buy {
+      background:
+        radial-gradient(80% 60% at 50% -10%, #c8f54222, transparent 50%),
+        linear-gradient(180deg, #15170f, #0a0b08);
+      border-color: #c8f54255;
+      box-shadow: 0 0 80px #c8f54214;
+    }
+    .receipt h3, .buy h3 { margin: 0 0 18px; font-family: var(--display); }
+    .line { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+    .line span { color: var(--mute); }
+    .line.total { font-weight: 600; font-size: 20px; border-bottom: 0; padding-top: 16px; font-family: var(--display); }
+    .line.total b { color: var(--down); font-family: var(--num); }
+    .buy .big {
+      font-family: var(--serif); font-size: clamp(72px, 8vw, 104px);
+      font-weight: 400; letter-spacing: -0.04em; line-height: 0.85;
+    }
+    .buy .big small { font-family: var(--mono); font-size: 14px; color: var(--mute); letter-spacing: 0.08em; text-transform: uppercase; }
+    .buy .plabel {
+      font: 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--accent); display: block; margin: 16px 0 6px;
+    }
+    .buy .plabel:first-of-type { margin-top: 0; }
+    .buy ul { margin: 8px 0 24px; padding: 0 0 0 18px; color: var(--mute); }
+    .buy li { margin: 8px 0; }
+
+    .faq details { border-top: 1px solid var(--line); padding: 18px 0; }
+    .faq summary { cursor: pointer; font-family: var(--display); font-weight: 700; letter-spacing: -0.03em; font-size: 18px; }
+    .faq p { color: var(--mute); margin: 10px 0 0; max-width: 44rem; }
+    footer.cta {
+      margin: 64px 0 20px; padding: 72px 28px; border-radius: 28px; text-align: center;
+      background:
+        radial-gradient(700px 220px at 50% 0%, #c8f54222, transparent),
+        var(--elev);
+      border: 1px solid var(--line);
+    }
+    footer.cta h2 { font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 64px); letter-spacing: -0.03em; }
+    footer.legal { color: var(--mute); font-size: 12px; padding: 8px 0 56px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-family: var(--mono); }
+    code { font-family: var(--mono); font-size: 0.88em; background: #ffffff0a; padding: 1px 5px; border-radius: 4px; }
+
+    @media (max-width: 960px) {
+      .nav-links { display: none; }
+      .hero { min-height: 0; padding-top: 40px; }
+      h1 { max-width: none; }
+      .qs, .bento, .kills, .price-wrap, .steps, .honest, .math { grid-template-columns: 1fr; }
+      .feat.big, .limits { grid-row: auto; grid-column: auto; }
+      .stat { border-right: 0; border-bottom: 1px solid var(--line); text-align: left; padding: 18px 4px; }
+      .cta-row .btn { width: 100%; }
+      .steps::before { display: none; }
+      .row { grid-template-columns: 14px 1fr auto auto; }
+      .row .url { display: none; }
+      .q { min-height: 0; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="grain" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+    <filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="4" stitchTiles="stitch"/></filter>
+    <rect width="100%" height="100%" filter="url(#n)"/>
+  </svg>
+  <div class="spot"></div>
+  <div class="vignette"></div>
+
+  <nav>
+    <div class="bar">
+      <a class="brand" href="#"><span class="mark"></span> IndieStack</a>
+      <div class="nav-links">
+        <a href="#what">Product</a>
+        <a href="#replace">Replaces</a>
+        <a href="#limits">Limits</a>
+        <a href="#price">Pricing</a>
+      </div>
+      <a class="btn primary" href="#price">Skip the paywall · $120</a>
+    </div>
+  </nav>
+
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker-track">
+      <span>UptimeRobot free · <b>personal use only</b></span>
+      <span>Webhooks <b>behind Pro</b></span>
+      <span>Status pages <b>$29–39/mo</b></span>
+      <span>Better Stack paid <b>−$34/mo</b> · overkill for “is it up”</span>
+      <span>Cronitor <b>−$10/mo</b> if you buy it</span>
+      <span>If you buy both <b>$528/yr</b></span>
+      <span>UptimeRobot free · <b>personal use only</b></span>
+      <span>Webhooks <b>behind Pro</b></span>
+      <span>Status pages <b>$29–39/mo</b></span>
+      <span>Better Stack paid <b>−$34/mo</b> · overkill for “is it up”</span>
+      <span>Cronitor <b>−$10/mo</b> if you buy it</span>
+      <span>If you buy both <b>$528/yr</b></span>
+    </div>
+  </div>
+
+  <header class="hero">
+    <div class="floor" aria-hidden="true"></div>
+    <div class="wrap">
+      <div class="kicker"><span class="dot"></span> You shipped. Then the paywall.</div>
+      <h1>Free monitoring ended when you started charging.<br/><em>That’s a Worker.</em></h1>
+      <p class="lede">UptimeRobot’s free plan is personal-use. A product is commercial. Webhooks and a real status page sit behind Pro. Heartbeats are a second product. Most of you already hit <strong>one</strong> of those walls. If you buy paid uptime <em>and</em> Cronitor, the stack they sell is <strong>$528/year</strong>. IndieStack is one Worker on the Cloudflare free plan you already have. $120 once. Deploy this afternoon.</p>
+      <div class="cta-row">
+        <a class="btn primary lg" href="#price">Skip the paywall · $120</a>
+        <a class="btn ghost lg" href="https://indiestack.manol-trendafilov.workers.dev/">See the live Worker</a>
+      </div>
+      <p class="fine">Discord when it dies. The Worker runs on Cloudflare — not on the origin it watches. One sitting. Payback vs the stacked bill: 11 weeks.</p>
+    </div>
+  </header>
+
+  <div class="product">
+    <div class="wrap">
+      <div class="glow"></div>
+      <div class="chrome" aria-label="Status page mock">
+        <div class="chrome-bar">
+          <span class="traffic"><i></i><i></i><i></i></span>
+          <div class="urlbar">yourapp.workers.dev</div>
+        </div>
+        <div class="screen-head">
+          <strong>status</strong>
+          <span class="pill">all up · 2m ago</span>
+        </div>
+        <div class="row">
+          <span class="led up"></span>
+          <div class="name">marketing site</div>
+          <div class="url">https</div>
+          <span class="ms">200</span><span class="ms">142ms</span>
+        </div>
+        <div class="row">
+          <span class="led up"></span>
+          <div class="name">api /health</div>
+          <div class="url">keyword · "ok"</div>
+          <span class="ms">200</span><span class="ms">89ms</span>
+        </div>
+        <div class="row">
+          <span class="led up"></span>
+          <div class="name">nightly backup</div>
+          <div class="url">heartbeat · 24h + 2m grace</div>
+          <span class="ms">beat</span><span class="ms">11m ago</span>
+        </div>
+        <div class="row">
+          <span class="led up"></span>
+          <div class="name">postgres 5432</div>
+          <div class="url">tcp</div>
+          <span class="ms">open</span><span class="ms">31ms</span>
+        </div>
+        <div class="row">
+          <span class="led up"></span>
+          <div class="name">example.com ssl</div>
+          <div class="url">expiry · 84d</div>
+          <span class="ms">ok</span><span class="ms">daily</span>
+        </div>
+        <div class="row">
+          <span class="led down"></span>
+          <div class="name">staging ssh</div>
+          <div class="url">tcp :22 · paused</div>
+          <span class="ms">—</span><span class="ms">mute</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="math">
+      <div class="stat">
+        <span class="tag">Before · if you buy both</span>
+        <div class="n">$528/yr</div>
+        <div class="l">Paid uptime $408 + Cronitor $120. Most of you already pay for one: commercial ToS, webhooks on Pro, or a $29+ status page. Better Stack at $34/mo is overkill for “is it up?”</div>
+      </div>
+      <div class="stat">
+        <span class="tag">After</span>
+        <div class="n save">$0/mo</div>
+        <div class="l">Your Worker. Your D1. Discord when the site or the backup dies. Public status on your domain. No second bill.</div>
+      </div>
+      <div class="stat">
+        <span class="tag">Bridge</span>
+        <div class="n">$120</div>
+        <div class="l">IndieStack, once. Deploy in one sitting. If you were going to buy both, year two you keep $528. If you only hit one paywall, you still stop paying it.</div>
+      </div>
+    </div>
+  </div>
+
+  <section id="what">
+    <div class="wrap">
+      <h2>The mechanism: a Worker that isn’t on your origin.</h2>
+      <p class="sub">If the monitor shares the box with the app, it dies with the app — that’s the Kuma trap. IndieStack runs on Cloudflare, not on the VPS it watches. You deploy it to the account you already have. D1, R2, one cron. The Worker <em>is</em> the monitor.</p>
+      <div class="qs">
+        <article class="q">
+          <em>01</em>
+          <div class="tag">ping</div>
+          <h3>Is the site up?</h3>
+          <p>HTTP, TCP, DNS, SSL and domain expiry. Keyword present/absent, expected status, slow-response ceiling. Two failures before a down alert — one blip is not an outage.</p>
+        </article>
+        <article class="q">
+          <em>02</em>
+          <div class="tag">heartbeat</div>
+          <h3>Did the job run?</h3>
+          <p>Your cron hits <code>/beat/&lt;token&gt;</code>. If it goes quiet past interval + grace, Discord/Slack fires. IndieStack does not run the job. It notices the job did not run.</p>
+        </article>
+        <article class="q">
+          <em>03</em>
+          <div class="tag">status + logs</div>
+          <h3>Where do I send people?</h3>
+          <p>Public status is <code>/</code> on your Worker. Errors POST to <code>/log/&lt;token&gt;</code> and live 24h in R2 — admin only, never on the status page.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Caps are the product. That’s how you stay on free.</h2>
+      <p class="sub">A typical indie — 10 URLs every 5 minutes + a few heartbeats — is a few thousand requests a day. Workers Free is 100k. You will not hit it. These limits exist so you cannot accidentally become a monitoring farm and blow the plan.</p>
+      <div class="bento">
+        <div class="feat big">
+          <b>20 uptime monitors</b>
+          <span>HTTPS, HTTP, TCP (443, SSH, Postgres, Redis, SMTP), host-up, DNS A/AAAA/MX, SSL expiry, domain expiry. Interval 1–60 min.</span>
+          <span class="ben">So 10 URLs × 5 min stays ~6k checks/day. You don’t buy Pro for 60-second checks you won’t use.</span>
+        </div>
+        <div class="feat">
+          <b>20 cron heartbeats</b>
+          <span>Job curls <code>/beat/:token</code>. Alert on first miss after grace.</span>
+          <span class="ben">Same job as Cronitor or Healthchecks. No second product, no second login.</span>
+        </div>
+        <div class="feat">
+          <b>10 log sources</b>
+          <span>JSON ingest, 8KB max, 24h in R2. No D1 write on ingest.</span>
+          <span class="ben">Errors you can grep. Not a Datadog bill.</span>
+        </div>
+        <div class="feat">
+          <b>1 public status page</b>
+          <span>Your Worker’s <code>/</code>. <code>/health</code> is 200 or 503. <code>/health.json</code> for scripts.</span>
+          <span class="ben">r/SaaS: status pages start at $29–39/mo. Yours is <code>/</code> on the Worker.</span>
+        </div>
+        <div class="feat">
+          <b>Discord / Slack / webhook</b>
+          <span>Down and up. Cloudflare Free does not send mail.</span>
+          <span class="ben">UptimeRobot put webhooks behind Pro. Discord is included. SMS is why people stay on paid UR.</span>
+        </div>
+        <div class="limits" id="limits">
+          <h3>Designed to fit Cloudflare Free</h3>
+          <table>
+            <tr><td>5 cron triggers / account</td><td>We use <b>one</b> tick (<code>* * * * *</code>). Jobs are rows, not extra crons.</td></tr>
+            <tr><td>100k Worker requests / day</td><td>20 URLs × 5 min ≈ 6k checks/day. Headroom for your actual app.</td></tr>
+            <tr><td>100k D1 writes / day</td><td>Two writes per HTTP check. Heartbeats write on beat/miss. Logs skip D1.</td></tr>
+            <tr><td>10 ms CPU (free)</td><td><code>fetch()</code> wait is free. Bodies capped at 64KB, only read for keywords.</td></tr>
+            <tr><td>No email on free</td><td>Webhooks only. If you need SMS, keep UptimeRobot.</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="replace">
+    <div class="wrap">
+      <h2>The stack they sell if you buy both.</h2>
+      <p class="sub">Most indies hit <strong>one</strong> paywall: commercial ToS, webhooks, or a status page. The $528 is what it costs if you buy paid uptime <em>and</em> Cronitor — not a claim that you already pay both. Prices from <a href="https://canivibecodeit.com">canivibecodeit.com</a>. Pingdom and Checkly are substitutes. Don’t add them.</p>
+      <div class="kills">
+        <article class="kill">
+          <div class="was">$408</div>
+          <h3>Better Stack / UptimeRobot paid</h3>
+          <p>Indie roundups: $34/mo is overkill for “is the site up?” UR free is personal-use; webhooks are Pro. We take HTTP + status + Discord, on your D1.</p>
+          <div class="fit yes">Named pair · in the $528</div>
+        </article>
+        <article class="kill">
+          <div class="was">$120</div>
+          <h3>Cronitor</h3>
+          <p>If you buy it: $10/mo. Healthchecks.io does the same job free for 20 checks. We fold the heartbeat into the Worker so you don’t run two tools.</p>
+          <div class="fit yes">Named pair · in the $528</div>
+        </article>
+        <article class="kill">
+          <div class="was">varies</div>
+          <h3>Instatus</h3>
+          <p>Status pages start ~$29/mo. Yours is <code>/</code> on the Worker. No email subscribers — Discord is the alert.</p>
+          <div class="fit yes">Kinda · no subscriber list</div>
+        </article>
+        <article class="kill">
+          <div class="was">$180</div>
+          <h3>Pingdom</h3>
+          <p>Uptime checks from Cloudflare</p>
+          <div class="fit no">Substitute — don’t add it</div>
+        </article>
+        <article class="kill">
+          <div class="was">$288</div>
+          <h3>Checkly</h3>
+          <p>HTTP/API checks only. No Playwright synthetics.</p>
+          <div class="fit no">Skip</div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>One sitting. A button. Then it’s yours.</h2>
+      <p class="sub">Cloudflare does not host this for you. It creates the Worker on <em>your</em> account so every later git push ships. No box to patch.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="num">01</div>
+          <h3>Buy · $120</h3>
+          <p class="sub" style="margin:0">You get the Worker. Not a seat. Not a month. The code and the deploy button.</p>
+        </div>
+        <div class="step">
+          <div class="num">02</div>
+          <h3>Click Deploy to Cloudflare</h3>
+          <p class="sub" style="margin:0">Connect GitHub. Leave D1 and R2 on “Create new”. Leave <code>ADMIN_TOKEN</code> blank.</p>
+        </div>
+        <div class="step">
+          <div class="num">03</div>
+          <h3>Open /admin</h3>
+          <p class="sub" style="margin:0">A token is shown once. Copy it. Add your URL. Optional: Discord webhook + a cron heartbeat.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Be honest about what you give up.</h2>
+      <p class="sub">If you need these, keep paying the SaaS. IndieStack is “Discord pings me when the site or the backup dies.”</p>
+      <div class="honest">
+        <div class="box keep">
+          <h3>You keep</h3>
+          <p>Uptime, keyword, status codes, slow checks, TCP ports, DNS, SSL/domain expiry, cron heartbeats, a status page on your domain, Discord/Slack, 24h error ingest, JSON backup, the data.</p>
+        </div>
+        <div class="box skip">
+          <h3>You skip</h3>
+          <p>SMS / voice, PagerDuty, multi-region confirm, 15-second intervals (Cloudflare cron is 1 min min), 50-monitor farms, team seats, status-page subscribers, Playwright flows, Datadog.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="price">
+    <div class="wrap price-wrap">
+      <div class="receipt">
+        <h3>Proof they will send this anyway</h3>
+        <div class="line"><span>Better Stack / UptimeRobot paid</span><b>$408/yr</b></div>
+        <div class="line"><span>Cronitor</span><b>$120/yr</b></div>
+        <div class="line"><span>Cloudflare Workers Free</span><b>$0</b></div>
+        <div class="line total"><span>Every year, forever</span><b>$528</b></div>
+        <p class="fine" style="margin:16px 0 0">canivibecodeit.com: Cronitor $10/mo, Better Stack / UptimeRobot paid $34/mo. Pingdom $180 and Checkly $288 are not added — you’d pick one uptime tool, not three.</p>
+      </div>
+      <div class="buy">
+        <span class="plabel">Promise</span>
+        <h3>Kill the $528/year stack.</h3>
+        <div class="big">$120 <small>once</small></div>
+        <span class="plabel">Picture</span>
+        <p class="fine" style="margin:0">Your status page. Your D1. Discord when the backup misses. No second card on file.</p>
+        <span class="plabel">Proof</span>
+        <ul>
+          <li>Live Worker is up — click “See the live Worker”</li>
+          <li>Caps sized to Workers Free (20 / 20 / 10)</li>
+          <li>CIVCI prices, not a made-up bundle</li>
+          <li>You keep the repo after you pay</li>
+        </ul>
+        <span class="plabel">Push</span>
+        <a class="btn primary lg" href="#" style="width:100%">Cancel $528/year · $120</a>
+        <p class="fine" style="margin:12px 0 0;text-align:center">Deploy this afternoon. Payback ~11 weeks. Not a subscription.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap faq">
+      <h2>Questions builders actually ask</h2>
+      <details open>
+        <summary>Is this a hosted product?</summary>
+        <p>No. You deploy the Worker to your Cloudflare account. IndieStack never sees your URLs. The $120 is for the stack, not for us to run it.</p>
+      </details>
+      <details>
+        <summary>Will I blow the free plan?</summary>
+        <p>A typical indie setup — 10 URLs every 5 minutes + a few heartbeats — is a few thousand Worker requests and D1 writes per day. Free is 100k of each. Caps (20 / 20 / 10) exist so you cannot accidentally become a monitoring farm.</p>
+      </details>
+      <details>
+        <summary>Why $120 if Cloudflare is free?</summary>
+        <p>Cloudflare is free. The weekend you’d spend rebuilding UptimeRobot + Cronitor + a status page is not. Cronitor alone is $120/year. Pay once, deploy, cancel the rest.</p>
+      </details>
+      <details>
+        <summary>Can I just vibecode this myself?</summary>
+        <p>Yes — that’s the whole canivibecodeit.com point. IndieStack is for when you’d rather ship the product you’re actually building, and still kill the $528 bill this afternoon.</p>
+      </details>
+      <details>
+        <summary>What about Uptime Kuma / Healthchecks?</summary>
+        <p>Great if you want to babysit a VPS. IndieStack is the same job with no box to patch: one Worker, one D1, one R2, one cron, on infra you already have.</p>
+      </details>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <footer class="cta">
+      <div class="kicker" style="margin-bottom:18px"><span class="dot"></span> You already have the infra. You’re paying for the SaaS.</div>
+      <h2>Deploy the Worker. Cancel the stack.</h2>
+      <p class="sub" style="margin-left:auto;margin-right:auto">Uptime, cron heartbeats, status, 24h logs. On your account. $120 once. $408 back in year one. $528 every year after.</p>
+      <a class="btn primary lg" href="#price">Cancel $528/year · $120</a>
+    </footer>
+    <div class="legal">
+      <span>IndieStack · one Worker, one user, $0 infra on Cloudflare Free</span>
+      <span>Replacement prices from canivibecodeit.com · not affiliated with Cloudflare</span>
+    </div>
+  </div>
+</body>
+</html>
