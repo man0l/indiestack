@@ -141,6 +141,20 @@ export function page(title: string, body: string, extraHead = ""): string {
     .log-lvl.error, .log-lvl.err, .log-lvl.fatal { color: var(--down); }
     .log-lvl.warn, .log-lvl.warning { color: var(--wait); }
     footer { margin-top: 36px; color: var(--mute); font-size: 12px; }
+    details.fold { margin: 16px 0; }
+    details.fold > summary {
+      cursor: pointer;
+      color: var(--mute);
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 650;
+      user-select: none;
+    }
+    details.fold > summary::-webkit-details-marker { display: none; }
+    details.fold > summary::before { content: "+  "; }
+    details.fold[open] > summary::before { content: "–  "; }
+    details.fold .card { margin-top: 8px; }
     @media (max-width: 560px) {
       h1 { font-size: 32px; }
       .row { grid-template-columns: 14px 1fr; }
@@ -273,7 +287,48 @@ export function adminPage(
     <h2>rollups</h2>
     ${history}
     <footer>${esc(footer)}</footer>`,
+    foldScript(),
   );
+}
+
+function foldScript(): string {
+  return `<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var PREFIX = "indie.fold:";
+  function labelFor(el) {
+    var actions = el.querySelectorAll("button[type=submit], a.btn");
+    if (actions.length === 1 && actions[0].textContent.trim()) return actions[0].textContent.trim();
+    var n = el.previousElementSibling;
+    while (n) {
+      if (n.tagName === "H2") return n.textContent.trim();
+      n = n.previousElementSibling;
+    }
+    return "expand";
+  }
+  function foldId(el) {
+    return el.getAttribute("action")
+      || (el.querySelector("form") && el.querySelector("form").getAttribute("action"))
+      || (el.querySelector("a.btn") && el.querySelector("a.btn").getAttribute("href"))
+      || "card";
+  }
+  document.querySelectorAll("form.card, div.card").forEach(function (el) {
+    if (el.closest("details.fold")) return;
+    if (el.tagName === "DIV" && !el.querySelector("form, a.btn")) return;
+    var id = foldId(el);
+    var wrap = document.createElement("details");
+    wrap.className = "fold";
+    var sum = document.createElement("summary");
+    sum.textContent = labelFor(el);
+    wrap.appendChild(sum);
+    el.parentNode.insertBefore(wrap, el);
+    wrap.appendChild(el);
+    wrap.open = localStorage.getItem(PREFIX + id) === "1";
+    wrap.addEventListener("toggle", function () {
+      localStorage.setItem(PREFIX + id, wrap.open ? "1" : "0");
+    });
+  });
+});
+</script>`;
 }
 
 export function overallOf(health: { up: number; down: number; unknown: number }): {
