@@ -11,6 +11,14 @@ import { getSetting, listJobs, listMonitors, setSetting } from "./kernel/db";
 import { runTick } from "./kernel/tick";
 import { MAX_JOBS, MAX_MONITORS, type Incident, type Job, type Monitor } from "./kernel/types";
 import { clamp, parseHttpUrl, parseMuteUntil } from "./kernel/util";
+import {
+  MAX_LOG_SOURCES,
+  deleteSourceLogs,
+  getLogSource,
+  ingest,
+  listEvents,
+  listLogSources,
+} from "./logs";
 import { buildTarget, kindOf, probe } from "./ping";
 import { applyTemplate } from "./templates";
 import {
@@ -20,6 +28,7 @@ import {
   editMonitorPage,
   html,
   loginPage,
+  logsPage,
   revealPage,
   statusPage,
   type Stats,
@@ -48,6 +57,13 @@ async function handle(request: Request, env: Env): Promise<Response> {
   const beat = path.match(/^\/beat\/([A-Za-z0-9_-]+)$/);
   if (beat && (method === "GET" || method === "POST")) {
     return beatJob(beat[1], env);
+  }
+  const log = path.match(/^\/log\/([A-Za-z0-9_-]+)$/);
+  if (log) {
+    if (method !== "POST") {
+      return Response.json({ ok: false, error: "POST only" }, { status: 405 });
+    }
+    return ingestLog(log[1], request, env);
   }
 
   if (path === "/health.json" && method === "GET") {
@@ -100,6 +116,19 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (path === "/admin/jobs" && method === "POST") {
       return addJob(request, env);
     }
+    if (path === "/admin/logs" && method === "POST") {
+      return addLogSource(request, env);
+    }
+    const logToggle = path.match(/^\/admin\/logs\/([^/]+)\/toggle$/);
+    if (logToggle && method === "POST") {
+      return toggleRow(env, "log_sources", logToggle[1]);
+    }
+    const logDel = path.match(/^\/admin\/logs\/([^/]+)\/delete$/);
+    if (logDel && method === "POST") {
+      return deleteLogSource(logDel[1], env);
+    }
+    const logId = path.match(/^\/admin\/logs\/([^/]+)$/);
+    if (logId && method === "GET") return showLogs(logId[1], env, url.origin);
     const jobToggle = path.match(/^\/admin\/jobs\/([^/]+)\/toggle$/);
     if (jobToggle && method === "POST") {
       return toggleRow(env, "jobs", jobToggle[1]);
@@ -144,6 +173,14 @@ async function beatJob(token: string, env: Env): Promise<Response> {
   });
 }
 
+async function ingestLog(token: string, request: Request, env: Env): Promise<Response> {
+  const result = await ingest(env, token, request);
+  if (!result.ok) {
+    return Response.json({ ok: false, error: result.error }, { status: result.status });
+  }
+  return Response.json({ ok: true, ts: result.ts });
+}
+
 async function status(env: Env): Promise<Response> {
   const monitors = await listMonitors(env.DB);
   const jobs = await listJobs(env.DB);
@@ -183,13 +220,16 @@ async function status(env: Env): Promise<Response> {
 async function admin(env: Env, origin: string, msg: string | null): Promise<Response> {
   const monitors = await listMonitors(env.DB);
   const jobs = await listJobs(env.DB);
+  const sources = await listLogSources(env.DB);
   const webhook = (await getSetting(env.DB, "webhook_url")) ?? "";
   const listed = await env.BUCKET.list({ prefix: "rollups/" });
   const rollups = listed.objects
     .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
     .sort()
     .reverse();
-  return html(adminPage(env.APP_NAME, origin, monitors, jobs, webhook, rollups, msg ?? undefined));
+  return html(
+    adminPage(env.APP_NAME, origin, monitors, jobs, sources, webhook, rollups, msg ?? undefined),
+  );
 }
 
 async function addMonitor(request: Request, env: Env): Promise<Response> {
@@ -354,7 +394,38 @@ async function deleteJob(id: string, env: Env): Promise<Response> {
   return redirect("/admin?msg=removed");
 }
 
-async function toggleRow(env: Env, table: "monitors" | "jobs", id: string): Promise<Response> {
+async function addLogSource(request: Request, env: Env): Promise<Response> {
+  const form = await request.formData();
+  const name = String(form.get("name") ?? "").trim().slice(0, 40);
+  if (!name) return redirect("/admin?msg=name%20required");
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM log_sources").first<{ n: number }>();
+  if ((count?.n ?? 0) >= MAX_LOG_SOURCES) return redirect("/admin?msg=max%2010%20log%20sources");
+  const id = crypto.randomUUID();
+  const token = crypto.randomUUID().replaceAll("-", "");
+  await env.DB.prepare("INSERT INTO log_sources (id, name, token, created_at) VALUES (?, ?, ?, ?)")
+    .bind(id, name, token, Date.now())
+    .run();
+  return redirect("/admin?msg=log%20source%20added");
+}
+
+async function showLogs(id: string, env: Env, origin: string): Promise<Response> {
+  const source = await getLogSource(env.DB, id);
+  if (!source) return redirect("/admin?msg=not%20found");
+  const events = await listEvents(env, source.id);
+  return html(logsPage(env.APP_NAME, origin, source, events));
+}
+
+async function deleteLogSource(id: string, env: Env): Promise<Response> {
+  await deleteSourceLogs(env, id);
+  await env.DB.prepare("DELETE FROM log_sources WHERE id = ?").bind(id).run();
+  return redirect("/admin?msg=removed");
+}
+
+async function toggleRow(
+  env: Env,
+  table: "monitors" | "jobs" | "log_sources",
+  id: string,
+): Promise<Response> {
   await env.DB.prepare(`UPDATE ${table} SET enabled = 1 - enabled WHERE id = ?`).bind(id).run();
   return redirect("/admin?msg=toggled");
 }

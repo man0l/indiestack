@@ -73,6 +73,7 @@ One Worker. Copy-paste folders under `src/`:
 - **kernel/** — types, D1, auth, alerts, R2 rollups, `scheduled()` tick
 - **ping/** — HTTP/TCP/DNS/SSL/domain probes
 - **heartbeat/** — `/beat/:token`; tick marks it down if `last_beat + interval + grace` is in the past
+- **logs/** — `POST /log/:token` → R2 (no D1 write on ingest); admin tail at `/admin/logs/:id`
 - **templates/** — one-click HTTPS/SSH/DNS/SSL/domain monitors
 - **index.ts** — routes · **ui.ts** — HTML
 

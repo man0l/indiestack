@@ -1,4 +1,5 @@
 import { isMuted, type Incident, type Job, type Monitor } from "./kernel/types";
+import type { LogEvent, LogSource } from "./logs";
 import { kindOf } from "./ping/target";
 import { TEMPLATES } from "./templates";
 
@@ -132,6 +133,9 @@ function page(title: string, body: string, extraHead = ""): string {
     .tpl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     .tpl button { background: var(--card); color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
     .err { color: var(--down); margin: 0 0 16px; }
+    .log-lvl { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); }
+    .log-lvl.error, .log-lvl.err, .log-lvl.fatal { color: var(--down); }
+    .log-lvl.warn, .log-lvl.warning { color: var(--wait); }
     footer { margin-top: 36px; color: var(--mute); font-size: 12px; }
     @media (max-width: 560px) {
       h1 { font-size: 32px; }
@@ -315,6 +319,7 @@ export function adminPage(
   origin: string,
   monitors: Monitor[],
   jobs: Job[],
+  sources: LogSource[],
   webhook: string,
   rollups: string[],
   flash?: string,
@@ -380,6 +385,31 @@ export function adminPage(
           })
           .join("");
 
+  const logList =
+    sources.length === 0
+      ? `<p class="sub">No log sources. POST errors here — not access logs. Kept 24h in R2.</p>`
+      : sources
+          .map((s) => {
+            const url = `${origin}/log/${s.token}`;
+            return `<div class="row">
+              <div class="dot ${s.enabled ? "up" : "paused"}"></div>
+              <div>
+                <div class="name">${esc(s.name)}${s.enabled ? "" : " · paused"}</div>
+                <div class="url">curl -fsS -X POST ${esc(url)} -H 'content-type: application/json' -d '{"level":"error","message":"…"}'</div>
+              </div>
+              <div class="actions">
+                <a class="btn ghost" href="/admin/logs/${esc(s.id)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">tail</a>
+                <form method="post" action="/admin/logs/${esc(s.id)}/toggle">
+                  <button class="ghost" type="submit">${s.enabled ? "pause" : "resume"}</button>
+                </form>
+                <form method="post" action="/admin/logs/${esc(s.id)}/delete">
+                  <button class="danger" type="submit">remove</button>
+                </form>
+              </div>
+            </div>`;
+          })
+          .join("");
+
   const history =
     rollups.length === 0
       ? `<p class="sub">Daily JSON land in R2 after midnight UTC.</p>`
@@ -397,7 +427,7 @@ export function adminPage(
       </div>
     </header>
     ${flash ? `<p class="sub">${esc(flash)}</p>` : ""}
-    <p class="sub">${monitors.length}/20 monitors · ${jobs.length}/20 cron · public <a href="/">/</a></p>
+    <p class="sub">${monitors.length}/20 monitors · ${jobs.length}/20 cron · ${sources.length}/10 logs · public <a href="/">/</a></p>
     <h2>templates</h2>
     <form class="card" method="post" action="/admin/templates">
       <label>host
@@ -476,6 +506,14 @@ export function adminPage(
       </label>
       <button type="submit">add heartbeat</button>
     </form>
+    <h2>logs</h2>
+    <div class="list">${logList}</div>
+    <form class="card" method="post" action="/admin/logs">
+      <label>name
+        <input type="text" name="name" maxlength="40" placeholder="api-errors" required/>
+      </label>
+      <button type="submit">add log source</button>
+    </form>
     <form class="card" method="post" action="/admin/settings">
       <label>alert webhook (discord / slack / generic JSON)
         <input type="url" name="webhook_url" value="${esc(webhook)}" placeholder="https://discord.com/api/webhooks/…"/>
@@ -484,7 +522,38 @@ export function adminPage(
     </form>
     <h2>rollups</h2>
     ${history}
-    <footer>HTTP uses 2-strike alerts. A heartbeat alerts on the first miss after grace. Mute times are UTC.</footer>`,
+    <footer>HTTP uses 2-strike alerts. A heartbeat alerts on the first miss after grace. Logs are admin-only, 8KB max, 24h in R2. Mute times are UTC.</footer>`,
+  );
+}
+
+export function logsPage(title: string, origin: string, source: LogSource, events: LogEvent[]): string {
+  const url = `${origin}/log/${source.token}`;
+  const rows =
+    events.length === 0
+      ? `<p class="sub">No events in the last 24h.</p>`
+      : `<div class="list">${events
+          .map((e) => {
+            const lvl = (e.level ?? "").toLowerCase();
+            return `<div class="row">
+              <div class="log-lvl ${esc(lvl)}">${esc(e.level ?? "log")}</div>
+              <div>
+                <div class="name">${esc(e.message)}</div>
+              </div>
+              <div class="meta">${esc(ago(e.ts))}</div>
+            </div>`;
+          })
+          .join("")}</div>`;
+  return page(
+    `logs · ${source.name}`,
+    `<header>
+      <div class="brand">${esc(title)} <span>logs</span></div>
+      <a href="/admin">back</a>
+    </header>
+    <h1 class="unknown">${esc(source.name)}</h1>
+    <p class="url">curl -fsS -X POST ${esc(url)} -H 'content-type: application/json' -d '{"level":"error","message":"…"}'</p>
+    <p class="sub">${source.enabled ? "live · last 50 · dropped after 24h" : "paused · ingest returns 404"}</p>
+    <h2>tail</h2>
+    ${rows}`,
   );
 }
 

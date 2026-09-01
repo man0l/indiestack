@@ -59,6 +59,16 @@ curl -fsS -X POST https://<worker>.workers.dev/beat/<token>
 
 If that line stops running, `/` goes red and the webhook fires. IndieStack does **not** run the job. It notices that the job did not run.
 
+6. Optional: add a **log source**. Your app POSTs JSON (8KB max). Events live 24h in R2, admin-only at `/admin/logs/…` — they do **not** appear on `/`.
+
+```bash
+curl -fsS -X POST https://<worker>.workers.dev/log/<token> \
+  -H 'content-type: application/json' \
+  -d '{"level":"error","message":"payment failed"}'
+```
+
+No D1 write on ingest. Not an access log.
+
 `/health` is 200 when everything enabled is up, 503 otherwise. `/health.json` is for scripts.
 
 ## Free-tier envelope (designed in)
@@ -67,11 +77,11 @@ If that line stops running, `/` goes red and the webhook fires. IndieStack does 
 |---|---|
 | 5 cron triggers / account | **One** tick (`* * * * *`). Jobs are rows, not extra crons. |
 | 100k Worker requests / day | Shared with your app. 20 URLs × 5 min ≈ 6k checks/day. |
-| 100k D1 writes / day | Two writes per HTTP check. Heartbeats only write on beat / miss. |
+| 100k D1 writes / day | Two writes per HTTP check. Heartbeats only write on beat / miss. Log ingest writes **R2 only**. |
 | 10 ms CPU | `fetch()` wait is free. Bodies are capped at 64KB and only read for keywords. |
 | No email sending on free | Webhooks only. |
 
-Caps in the app: 20 HTTP monitors, 20 heartbeats. Default interval 5 minutes. HTTP alerts after 2 failures. Heartbeats alert on the first miss after grace.
+Caps in the app: 20 HTTP monitors, 20 heartbeats, 10 log sources. Default interval 5 minutes. HTTP alerts after 2 failures. Heartbeats alert on the first miss after grace. Logs prune after 24h.
 
 ## Local
 

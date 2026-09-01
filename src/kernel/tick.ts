@@ -1,4 +1,5 @@
 import { scanHeartbeats } from "../heartbeat";
+import { maybePruneLogs } from "../logs";
 import { runPings } from "../ping/probe";
 import { getSetting } from "./db";
 import { maybePrune, maybeRollup } from "./rollup";
@@ -11,6 +12,7 @@ export async function runTick(env: Env): Promise<{ checked: number; jobs: number
   const hearts = await scanHeartbeats(env, now, webhook);
   await maybeRollup(env, now);
   await maybePrune(env, now);
+  await maybePruneLogs(env, now);
   const alerts = pinged.alerts + hearts.alerts;
   console.log(
     JSON.stringify({
