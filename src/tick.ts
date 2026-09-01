@@ -7,7 +7,6 @@ const FAIL_ALERT_AFTER = 2;
 const HOT_MS = 24 * 60 * 60 * 1000;
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
 const BODY_CAP = 64 * 1024;
-const ICMP_PORTS = [443, 80, 22];
 
 export type Kind = "http" | "tcp" | "udp" | "icmp" | "dns" | "ssl" | "domain";
 const SSL_DAYS = 14;
@@ -357,21 +356,17 @@ function failErr(err: unknown, t0: number, timeout_ms: number): CheckResult {
 }
 
 async function icmpProbe(hostname: string, timeout_ms: number): Promise<CheckResult> {
-  let last: CheckResult = {
+  const https = await httpReachable(hostname, 443, timeout_ms);
+  if (https.ok) return https;
+  const http = await httpReachable(hostname, 80, timeout_ms);
+  if (http.ok) return http;
+  const ssh = await tcpConnect(hostname, 22, timeout_ms);
+  if (ssh.ok) return ssh;
+  return {
     ok: false,
     status_code: null,
-    latency_ms: 0,
-    error: "no TCP 443/80/22",
-  };
-  for (const port of ICMP_PORTS) {
-    last = await tcpProbe(hostname, port, timeout_ms);
-    if (last.ok) {
-      return { ...last, error: null, status_code: port };
-    }
-  }
-  return {
-    ...last,
-    error: `no ICMP on Workers; TCP 443/80/22 failed (${last.error ?? "down"})`,
+    latency_ms: https.latency_ms,
+    error: `no ICMP on Workers; HTTPS/HTTP/22 failed (${ssh.error ?? https.error ?? "down"})`,
   };
 }
 
@@ -383,6 +378,24 @@ async function tcpProbe(
   if (port === 25) {
     return { ok: false, status_code: 25, latency_ms: 0, error: "port 25 blocked by Workers" };
   }
+  // Raw TCP to Cloudflare-proxied HTTP(S) is blocked. fetch() is the real check.
+  if (port === 443 || port === 80) {
+    return httpReachable(hostname, port, timeout_ms);
+  }
+  const raw = await tcpConnect(hostname, port, timeout_ms);
+  if (raw.ok) return raw;
+  const msg = raw.error ?? "";
+  if (msg.includes("HTTP-based service") || msg.includes("cannot connect to the specified address")) {
+    return httpReachable(hostname, port === 80 ? 80 : 443, timeout_ms);
+  }
+  return raw;
+}
+
+async function tcpConnect(
+  hostname: string,
+  port: number,
+  timeout_ms: number,
+): Promise<CheckResult> {
   const t0 = Date.now();
   let socket: Socket | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -407,6 +420,32 @@ async function tcpProbe(
     };
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+async function httpReachable(
+  hostname: string,
+  port: number,
+  timeout_ms: number,
+): Promise<CheckResult> {
+  const t0 = Date.now();
+  const proto = port === 80 ? "http" : "https";
+  const origin = port === 80 || port === 443 ? `${proto}://${hostname}/` : `${proto}://${hostname}:${port}/`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeout_ms);
+  try {
+    const res = await fetch(origin, {
+      method: "GET",
+      redirect: "follow",
+      signal: ac.signal,
+      headers: { "user-agent": "indiestack-ping/0.1" },
+    });
+    if (res.body) await res.body.cancel();
+    return { ok: true, status_code: res.status, latency_ms: Date.now() - t0, error: null };
+  } catch (err) {
+    return failErr(err, t0, timeout_ms);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
