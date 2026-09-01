@@ -451,6 +451,15 @@ export function adminPage(
           <option value="absent">must not contain</option>
         </select>
       </label>
+      <label>headers (one Header: value per line, HTTP only)
+        <textarea name="headers" rows="3" placeholder="Authorization: Bearer …"></textarea>
+      </label>
+      <label>still-down nag minutes (0 = off)
+        <input type="number" name="nag_min" min="0" max="1440" value="0"/>
+      </label>
+      <label>mute until UTC
+        <input type="datetime-local" name="mute_until"/>
+      </label>
       <button type="submit">add monitor</button>
     </form>
     <h2>cron monitor</h2>

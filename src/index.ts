@@ -244,9 +244,9 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
     last_error: null,
     consecutive: 0,
     created_at: now,
-    mute_until: null,
-    headers: null,
-    nag_min: 0,
+    mute_until: parseMuteUntil(String(form.get("mute_until") ?? "")),
+    headers: String(form.get("headers") ?? "").trim() || null,
+    nag_min: clamp(Number(form.get("nag_min") ?? 0), 0, 1440),
     last_nag_at: null,
   });
 }
