@@ -72,6 +72,271 @@ export function backupFilename(now = Date.now()): string {
   return `indiestack-${ymd(now)}.json`;
 }
 
+export const MAX_BACKUP_BYTES = 2 * 1024 * 1024;
+const BATCH = 40;
+const INV_EPOCH = 1_000_000_000_000_000;
+
+export type RestoreStats = {
+  monitors: number;
+  jobs: number;
+  log_sources: number;
+  settings: number;
+  checks: number;
+  rollups: number;
+  log_events: number;
+};
+
+export function parseBackup(raw: string): Backup {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("not JSON");
+  }
+  if (!data || typeof data !== "object") throw new Error("bad backup");
+  const o = data as Record<string, unknown>;
+  if (o.v !== 1) throw new Error("unsupported backup version");
+  const d1 = (o.d1 ?? {}) as Record<string, unknown>;
+  const r2 = (o.r2 ?? {}) as Record<string, unknown>;
+  const settingsRaw = d1.settings;
+  const settings: Record<string, string> = {};
+  if (settingsRaw && typeof settingsRaw === "object" && !Array.isArray(settingsRaw)) {
+    for (const [k, v] of Object.entries(settingsRaw as Record<string, unknown>)) {
+      if (typeof v === "string") settings[k] = v;
+    }
+  }
+  return {
+    v: 1,
+    exported_at: Number(o.exported_at) || Date.now(),
+    app: typeof o.app === "string" ? o.app : "indiestack",
+    d1: {
+      monitors: Array.isArray(d1.monitors) ? d1.monitors : [],
+      jobs: Array.isArray(d1.jobs) ? d1.jobs : [],
+      log_sources: Array.isArray(d1.log_sources) ? d1.log_sources : [],
+      settings,
+      checks: Array.isArray(d1.checks) ? d1.checks : [],
+    },
+    r2: {
+      rollups:
+        r2.rollups && typeof r2.rollups === "object" && !Array.isArray(r2.rollups)
+          ? (r2.rollups as Record<string, unknown>)
+          : {},
+      log_events:
+        r2.log_events && typeof r2.log_events === "object" && !Array.isArray(r2.log_events)
+          ? (r2.log_events as Backup["r2"]["log_events"])
+          : {},
+    },
+  };
+}
+
+export async function restoreBackup(env: Env, backup: Backup): Promise<RestoreStats> {
+  const stmts: D1PreparedStatement[] = [];
+
+  for (const raw of backup.d1.monitors) {
+    const m = asRec(raw);
+    const id = str(m.id);
+    if (!id) continue;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO monitors (
+           id, name, url, interval_min, expect_status, timeout_ms,
+           keyword, keyword_mode, max_latency_ms, enabled, status,
+           last_check_at, last_status_code, last_latency_ms, last_error,
+           consecutive, created_at, mute_until, headers, nag_min, last_nag_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        id,
+        str(m.name, id).slice(0, 40),
+        str(m.url),
+        int(m.interval_min, 5),
+        int(m.expect_status, 0),
+        int(m.timeout_ms, 8000),
+        nulstr(m.keyword),
+        nulstr(m.keyword_mode),
+        nulint(m.max_latency_ms),
+        int(m.enabled, 1),
+        str(m.status, "unknown"),
+        nulint(m.last_check_at),
+        nulint(m.last_status_code),
+        nulint(m.last_latency_ms),
+        nulstr(m.last_error),
+        int(m.consecutive, 0),
+        int(m.created_at, Date.now()),
+        nulint(m.mute_until),
+        nulstr(m.headers),
+        int(m.nag_min, 0),
+        nulint(m.last_nag_at),
+      ),
+    );
+  }
+
+  for (const raw of backup.d1.jobs) {
+    const j = asRec(raw);
+    const id = str(j.id);
+    const token = str(j.token);
+    if (!id || !token) continue;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO jobs (
+           id, name, token, interval_min, grace_min, enabled, status,
+           last_beat_at, last_error, consecutive, created_at, mute_until, nag_min, last_nag_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        id,
+        str(j.name, id).slice(0, 40),
+        token,
+        int(j.interval_min, 60),
+        int(j.grace_min, 2),
+        int(j.enabled, 1),
+        str(j.status, "unknown"),
+        nulint(j.last_beat_at),
+        nulstr(j.last_error),
+        int(j.consecutive, 0),
+        int(j.created_at, Date.now()),
+        nulint(j.mute_until),
+        int(j.nag_min, 0),
+        nulint(j.last_nag_at),
+      ),
+    );
+  }
+
+  for (const raw of backup.d1.log_sources) {
+    const s = asRec(raw);
+    const id = str(s.id);
+    const token = str(s.token);
+    if (!id || !token) continue;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO log_sources (id, name, token, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(id, str(s.name, id).slice(0, 40), token, int(s.enabled, 1), int(s.created_at, Date.now())),
+    );
+  }
+
+  for (const [key, value] of Object.entries(backup.d1.settings)) {
+    stmts.push(
+      env.DB.prepare(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      ).bind(key, value),
+    );
+  }
+
+  for (const raw of backup.d1.checks) {
+    const c = asRec(raw);
+    const monitorId = str(c.monitor_id);
+    if (!monitorId) continue;
+    if (c.id != null && Number.isFinite(Number(c.id))) {
+      stmts.push(
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO checks (id, monitor_id, ts, ok, status_code, latency_ms, error)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          Number(c.id),
+          monitorId,
+          int(c.ts, Date.now()),
+          int(c.ok, 0),
+          nulint(c.status_code),
+          nulint(c.latency_ms),
+          nulstr(c.error),
+        ),
+      );
+    } else {
+      stmts.push(
+        env.DB.prepare(
+          `INSERT INTO checks (monitor_id, ts, ok, status_code, latency_ms, error)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          monitorId,
+          int(c.ts, Date.now()),
+          int(c.ok, 0),
+          nulint(c.status_code),
+          nulint(c.latency_ms),
+          nulstr(c.error),
+        ),
+      );
+    }
+  }
+
+  await runBatches(env.DB, stmts);
+
+  let rollups = 0;
+  for (const [date, payload] of Object.entries(backup.r2.rollups)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+    await env.BUCKET.put(`rollups/${date}.json`, body, {
+      httpMetadata: { contentType: "application/json" },
+    });
+    rollups++;
+  }
+
+  let log_events = 0;
+  for (const [sourceId, events] of Object.entries(backup.r2.log_events)) {
+    if (!sourceId || !Array.isArray(events)) continue;
+    for (const ev of events) {
+      const ts = int(ev.ts, Date.now());
+      const level = ev.level ? String(ev.level).slice(0, 16) : null;
+      const message = str(ev.message, "(event)").slice(0, 200);
+      const key = logKey(sourceId, ts);
+      const event = { key, ts, level, message, data: { message } };
+      await env.BUCKET.put(key, JSON.stringify(event), {
+        httpMetadata: { contentType: "application/json" },
+        customMetadata: {
+          ts: String(ts),
+          level: level ?? "",
+          message: message.slice(0, 180),
+        },
+      });
+      log_events++;
+    }
+  }
+
+  return {
+    monitors: backup.d1.monitors.length,
+    jobs: backup.d1.jobs.length,
+    log_sources: backup.d1.log_sources.length,
+    settings: Object.keys(backup.d1.settings).length,
+    checks: backup.d1.checks.length,
+    rollups,
+    log_events,
+  };
+}
+
+async function runBatches(db: D1Database, stmts: D1PreparedStatement[]): Promise<void> {
+  for (let i = 0; i < stmts.length; i += BATCH) {
+    await db.batch(stmts.slice(i, i + BATCH));
+  }
+}
+
+function logKey(sourceId: string, ts: number): string {
+  const inv = String(INV_EPOCH - ts).padStart(16, "0");
+  return `logs/${sourceId}/${inv}-${crypto.randomUUID().replaceAll("-", "")}.json`;
+}
+
+function asRec(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function str(v: unknown, fallback = ""): string {
+  if (v == null) return fallback;
+  return String(v);
+}
+
+function nulstr(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  return String(v);
+}
+
+function int(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function nulint(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 async function all<T = Record<string, unknown>>(db: D1Database, sql: string): Promise<T[]> {
   const { results } = await db.prepare(sql).all<T>();
   return results ?? [];
