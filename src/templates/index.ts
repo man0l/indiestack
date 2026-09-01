@@ -1,4 +1,5 @@
-import { buildTarget, type Kind } from "./tick";
+import type { Kind } from "../kernel/types";
+import { buildTarget } from "../ping/target";
 
 export type Template = {
   id: string;

@@ -1,17 +1,18 @@
+import { recordBeat } from "./heartbeat";
 import {
-  MAX_JOBS,
-  MAX_MONITORS,
-  buildTarget,
-  getSetting,
-  kindOf,
-  probe,
-  recordBeat,
-  runTick,
-  setSetting,
-  type Incident,
-  type Job,
-  type Monitor,
-} from "./tick";
+  clearCookie,
+  isAdmin,
+  mintAdminToken,
+  resolveAdminToken,
+  safeEqual,
+  setCookie,
+} from "./kernel/auth";
+import { getSetting, listJobs, listMonitors, setSetting } from "./kernel/db";
+import { runTick } from "./kernel/tick";
+import { MAX_JOBS, MAX_MONITORS, type Incident, type Job, type Monitor } from "./kernel/types";
+import { clamp, parseHttpUrl, parseMuteUntil } from "./kernel/util";
+import { buildTarget, kindOf, probe } from "./ping";
+import { applyTemplate } from "./templates";
 import {
   adminPage,
   ago,
@@ -23,9 +24,6 @@ import {
   statusPage,
   type Stats,
 } from "./ui";
-import { applyTemplate } from "./templates";
-
-const COOKIE = "indie_admin";
 
 export default {
   async fetch(request, env) {
@@ -147,8 +145,8 @@ async function beatJob(token: string, env: Env): Promise<Response> {
 }
 
 async function status(env: Env): Promise<Response> {
-  const monitors = await listMonitors(env);
-  const jobs = await listJobs(env);
+  const monitors = await listMonitors(env.DB);
+  const jobs = await listJobs(env.DB);
   const statsRows = await env.DB.prepare(
     `SELECT monitor_id AS id, COUNT(*) AS n, SUM(ok) AS ok_n, AVG(latency_ms) AS avg_latency_ms
      FROM checks GROUP BY monitor_id`,
@@ -179,23 +177,19 @@ async function status(env: Env): Promise<Response> {
   )
     .bind(since)
     .all<Incident>();
-  return html(
-    statusPage(env.APP_NAME, monitors, jobs, stats, uptime24, inc.results ?? []),
-  );
+  return html(statusPage(env.APP_NAME, monitors, jobs, stats, uptime24, inc.results ?? []));
 }
 
 async function admin(env: Env, origin: string, msg: string | null): Promise<Response> {
-  const monitors = await listMonitors(env);
-  const jobs = await listJobs(env);
+  const monitors = await listMonitors(env.DB);
+  const jobs = await listJobs(env.DB);
   const webhook = (await getSetting(env.DB, "webhook_url")) ?? "";
   const listed = await env.BUCKET.list({ prefix: "rollups/" });
   const rollups = listed.objects
     .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
     .sort()
     .reverse();
-  return html(
-    adminPage(env.APP_NAME, origin, monitors, jobs, webhook, rollups, msg ?? undefined),
-  );
+  return html(adminPage(env.APP_NAME, origin, monitors, jobs, webhook, rollups, msg ?? undefined));
 }
 
 async function addMonitor(request: Request, env: Env): Promise<Response> {
@@ -223,9 +217,7 @@ async function addMonitor(request: Request, env: Env): Promise<Response> {
   const timeoutMs = clamp(Number(form.get("timeout_ms") ?? 8000), 1000, 15000);
   const maxLatencyRaw = Number(form.get("max_latency_ms") ?? 0);
   const maxLatency =
-    Number.isFinite(maxLatencyRaw) && maxLatencyRaw > 0
-      ? clamp(maxLatencyRaw, 1, 15000)
-      : null;
+    Number.isFinite(maxLatencyRaw) && maxLatencyRaw > 0 ? clamp(maxLatencyRaw, 1, 15000) : null;
   const keyword = String(form.get("keyword") ?? "").trim().slice(0, 80) || null;
   const keywordMode = keyword
     ? String(form.get("keyword_mode") ?? "exists") === "absent"
@@ -362,14 +354,8 @@ async function deleteJob(id: string, env: Env): Promise<Response> {
   return redirect("/admin?msg=removed");
 }
 
-async function toggleRow(
-  env: Env,
-  table: "monitors" | "jobs",
-  id: string,
-): Promise<Response> {
-  await env.DB.prepare(`UPDATE ${table} SET enabled = 1 - enabled WHERE id = ?`)
-    .bind(id)
-    .run();
+async function toggleRow(env: Env, table: "monitors" | "jobs", id: string): Promise<Response> {
+  await env.DB.prepare(`UPDATE ${table} SET enabled = 1 - enabled WHERE id = ?`).bind(id).run();
   return redirect("/admin?msg=toggled");
 }
 
@@ -412,34 +398,6 @@ async function gateAdmin(request: Request, env: Env): Promise<Response | null> {
     return html(loginPage(env.APP_NAME), 401);
   }
   return null;
-}
-
-function envToken(env: Env): string | null {
-  const v = (env as { ADMIN_TOKEN?: string }).ADMIN_TOKEN?.trim() ?? "";
-  if (!v || v === "change-me") return null;
-  return v;
-}
-
-async function resolveAdminToken(env: Env): Promise<string | null> {
-  return envToken(env) ?? (await getSetting(env.DB, "admin_token"));
-}
-
-async function mintAdminToken(env: Env): Promise<{ token: string; created: boolean }> {
-  const generated = generateToken();
-  const ins = await env.DB.prepare(
-    "INSERT INTO settings (key, value) VALUES ('admin_token', ?) ON CONFLICT(key) DO NOTHING",
-  )
-    .bind(generated)
-    .run();
-  const created = (ins.meta.changes ?? 0) > 0;
-  const token = created ? generated : ((await getSetting(env.DB, "admin_token")) ?? generated);
-  return { token, created };
-}
-
-function generateToken(): string {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function showEditMonitor(id: string, env: Env): Promise<Response> {
@@ -513,27 +471,6 @@ async function updateJob(id: string, request: Request, env: Env): Promise<Respon
   return redirect("/admin?msg=saved");
 }
 
-function parseMuteUntil(raw: string): number | null {
-  const s = raw.trim();
-  if (!s) return null;
-  const t = Date.parse(s.endsWith("Z") ? s : `${s}Z`);
-  return Number.isFinite(t) ? t : null;
-}
-
-async function listMonitors(env: Env): Promise<Monitor[]> {
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM monitors ORDER BY created_at ASC",
-  ).all<Monitor>();
-  return results ?? [];
-}
-
-async function listJobs(env: Env): Promise<Job[]> {
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM jobs ORDER BY created_at ASC",
-  ).all<Job>();
-  return results ?? [];
-}
-
 async function health(env: Env): Promise<{ up: number; down: number; unknown: number }> {
   const now = Date.now();
   const row = await env.DB.prepare(
@@ -578,69 +515,9 @@ async function healthJson(env: Env): Promise<Response> {
   });
 }
 
-async function isAdmin(request: Request, expected: string): Promise<boolean> {
-  const fromCookie = cookieValue(request, COOKIE);
-  const auth = request.headers.get("authorization");
-  const fromHeader = auth?.toLowerCase().startsWith("bearer ")
-    ? auth.slice(7)
-    : null;
-  const got = fromCookie ?? fromHeader;
-  if (!got) return false;
-  return safeEqual(got, expected);
-}
-
-function cookieValue(request: Request, name: string): string | null {
-  const cookie = request.headers.get("cookie") ?? "";
-  for (const part of cookie.split(";")) {
-    const [k, ...rest] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(rest.join("="));
-  }
-  return null;
-}
-
-function setCookie(request: Request, token: string): string {
-  const url = new URL(request.url);
-  const secure = url.protocol === "https:" ? "; Secure" : "";
-  return `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure}`;
-}
-
-function clearCookie(request: Request): string {
-  const url = new URL(request.url);
-  const secure = url.protocol === "https:" ? "; Secure" : "";
-  return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
-}
-
 function redirect(location: string, headers?: HeadersInit): Response {
   return new Response(null, {
     status: 303,
     headers: { location, ...headers },
   });
-}
-
-function parseHttpUrl(raw: string): URL | null {
-  try {
-    const u = new URL(raw);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-    return u;
-  } catch {
-    return null;
-  }
-}
-
-function clamp(n: number, min: number, max: number): number {
-  if (!Number.isFinite(n)) return min;
-  return Math.min(max, Math.max(min, Math.round(n)));
-}
-
-async function safeEqual(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder();
-  const aa = enc.encode(a);
-  const bb = enc.encode(b);
-  const n = Math.max(aa.byteLength, bb.byteLength, 1);
-  const xa = new Uint8Array(n);
-  const xb = new Uint8Array(n);
-  xa.set(aa);
-  xb.set(bb);
-  const sameLen = aa.byteLength === bb.byteLength;
-  return crypto.subtle.timingSafeEqual(xa, xb) && sameLen;
 }

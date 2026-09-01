@@ -68,9 +68,13 @@ Multi-region confirm, SMS/voice, team seats, status-page subscribers, incident c
 
 ## Layout
 
-- **Kernel** — one `scheduled()` tick, D1, R2 rollups, admin token, webhook
-- **ping** — Worker GETs your URL
-- **cron monitor** — your job POSTs `/beat/:token`; tick marks it down if `last_beat + interval + grace` is in the past
+One Worker. Copy-paste folders under `src/`:
+
+- **kernel/** — types, D1, auth, alerts, R2 rollups, `scheduled()` tick
+- **ping/** — HTTP/TCP/DNS/SSL/domain probes
+- **heartbeat/** — `/beat/:token`; tick marks it down if `last_beat + interval + grace` is in the past
+- **templates/** — one-click HTTPS/SSH/DNS/SSL/domain monitors
+- **index.ts** — routes · **ui.ts** — HTML
 
 Caps: 20 HTTP monitors, 20 jobs. Default HTTP interval 5 min. Heartbeat grace default 2 min. Alert on first missed beat (grace is the buffer).
 

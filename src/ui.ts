@@ -1,5 +1,6 @@
+import { isMuted, type Incident, type Job, type Monitor } from "./kernel/types";
+import { kindOf } from "./ping/target";
 import { TEMPLATES } from "./templates";
-import { isMuted, kindOf, type Incident, type Job, type Monitor } from "./tick";
 
 export type Stats = {
   n: number;
