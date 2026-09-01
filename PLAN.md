@@ -74,6 +74,7 @@ One Worker. Copy-paste folders under `src/`. Each plugin exports a `Plugin` and 
 - **ping/** — HTTP/TCP/DNS/SSL/domain probes
 - **heartbeat/** — `/beat/:token`; tick marks it down if `last_beat + interval + grace` is in the past
 - **logs/** — `POST /log/:token` → R2 (no D1 write on ingest); admin tail at `/admin/logs/:id`
+- **backup/** — admin JSON export of D1 + recent R2; does not delete data
 - **templates/** — one-click HTTPS/SSH/DNS/SSL/domain monitors
 - **index.ts** — Worker entry · **ui.ts** — page chrome only
 
