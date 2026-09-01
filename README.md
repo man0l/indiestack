@@ -4,7 +4,11 @@ Uptime checks and cron **monitoring** that run on **your** Cloudflare account. O
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/man0l/indiestack)
 
-The button clones this repo to your GitHub, creates D1 + R2, asks for an `ADMIN_TOKEN`, and deploys. Then open `/admin`, add a URL, paste a Discord webhook. That is the whole product.
+**The form will ask for GitHub. That is required.** Cloudflare does not upload the Worker from this page; it creates a **new** repo under *your* GitHub and deploys from there (so every later `git push` ships). Click **New GitHub connection**, authorize the Cloudflare GitHub App, then **Deploy**. Leave D1/R2 on “Create new”. When it asks for `ADMIN_TOKEN`, use a long random string.
+
+If GitHub already has a repo named `indiestack`, change **Project name** on that screen (e.g. `indiestack-ops`) or the create will fail.
+
+Do not want a second GitHub repo? Skip the button and use [CLI deploy](#cli-deploy-if-you-skip-the-button) from this repo.
 
 This is not a hosted SaaS. The Worker **is** the monitor.
 
