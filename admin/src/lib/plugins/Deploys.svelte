@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { GitBranch, Rocket, RefreshCw, Plus, Trash2, Pause, Play, Zap, Link2, Link2Off } from 'lucide-svelte';
+  import { GitBranch, Rocket, RefreshCw, Plus, Trash2, Pause, Play, Zap, Link2, Link2Off, Check } from 'lucide-svelte';
   import Badge from '../ui/badge.svelte';
   import Button from '../ui/button.svelte';
   import Card from '../ui/card.svelte';
@@ -20,6 +20,8 @@
     last_error: string | null;
   };
 
+  type Repo = { full_name: string; private: boolean; pushed_at: string };
+
   let targets: Target[] = $state([]);
   let github = $state({ connected: false, who: null as string | null });
   let vercel = $state({ connected: false, who: null as string | null });
@@ -28,7 +30,19 @@
   let msg = $state('');
   let err = $state('');
   let showAdd: 'github' | 'vercel' | null = $state(null);
-  let tokenInput = $state({ github: '', vercel: '' });
+
+  // github repo picker
+  let repos: Repo[] = $state([]);
+  let reposLoading = $state(false);
+  let reposError = $state('');
+  let selected: string[] = $state([]);
+  let repoFilter = $state('');
+  let manualRepo = $state('');
+  let interval = $state(5);
+
+  $effect(() => {
+    if (showAdd === 'github' && github.connected && repos.length === 0 && !reposLoading) loadRepos();
+  });
 
   async function load() {
     const r = await fetch('/api/deploys');
@@ -43,6 +57,20 @@
 
   onMount(load);
 
+  async function loadRepos() {
+    reposLoading = true;
+    reposError = '';
+    try {
+      const r = await fetch('/admin/deploys/repos');
+      const j = await r.json();
+      if (!r.ok || j.error) reposError = j.error ?? 'failed to list repos';
+      else repos = j.repos ?? [];
+    } catch (e) {
+      reposError = String(e);
+    }
+    reposLoading = false;
+  }
+
   async function api(action: string, body?: FormData | any) {
     busy = action;
     err = '';
@@ -51,7 +79,7 @@
       const opts: RequestInit =
         body instanceof FormData
           ? { method: 'POST', body, headers: { accept: 'application/json' } }
-          : { method: 'POST', headers: { accept: 'application/json' } };
+          : { method: 'POST', body: JSON.stringify(body), headers: { accept: 'application/json', 'content-type': 'application/json' } };
       const r = await fetch(action, opts);
       const j = await r.json().catch(() => ({ ok: r.ok }));
       if (!j.ok) err = j.error ?? 'failed';
@@ -64,6 +92,22 @@
     }
   }
 
+  function toggleSelect(name: string) {
+    selected = selected.includes(name) ? selected.filter((s) => s !== name) : [...selected, name];
+  }
+
+  function selectAllVisible() {
+    const visible = visibleRepos();
+    const allSelected = visible.every((r) => selected.includes(r.full_name));
+    const names = visible.map((r) => r.full_name);
+    selected = allSelected ? selected.filter((s) => !names.includes(s)) : [...new Set([...selected, ...names])];
+  }
+
+  function visibleRepos(): Repo[] {
+    const f = repoFilter.toLowerCase();
+    return f ? repos.filter((r) => r.full_name.toLowerCase().includes(f)) : repos;
+  }
+
   const ago = (ts: number | null) => {
     if (!ts) return 'never';
     const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -71,6 +115,11 @@
     if (s < 3600) return `${Math.floor(s / 60)}m ago`;
     if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
     return `${Math.floor(s / 86400)}d ago`;
+  };
+
+  const pushedAgo = (iso: string) => {
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? ago(t) : '';
   };
 </script>
 
@@ -86,7 +135,7 @@
       </Button>
       {#if github.connected}
         <Button on:click={() => (showAdd = showAdd === 'github' ? null : 'github')} disabled={busy !== ''}>
-          <span class="inline-flex items-center gap-1.5"><Plus size={13} /> github</span>
+          <span class="inline-flex items-center gap-1.5"><Plus size={13} /> add repos</span>
         </Button>
       {/if}
       {#if vercel.connected}
@@ -141,31 +190,64 @@
   {/if}
 </Card>
 
-{#if showAdd === 'github'}
+{#if showAdd === 'github' && github.connected}
   <Card>
-    <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><GitBranch size={15} /> watch a GitHub repo</div>
-    <form class="space-y-3" on:submit|preventDefault={(e) => {
-      const fd = new FormData(e.currentTarget as HTMLFormElement);
-      fd.set('provider', 'github');
-      api('/admin/deploys/targets', fd).then(() => (showAdd = null));
-    }}>
-      <div class="grid gap-3 sm:grid-cols-2">
-        <label class="text-xs text-[#8b919c]">repo (owner/repo)
-          <input name="repo" placeholder="man0l/indiestack" required class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">name (optional)
-          <input name="name" maxlength="40" placeholder="api deploys" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">interval minutes
-          <input type="number" name="interval_min" min="5" max="60" value="5" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
+    <div class="mb-3 flex items-center justify-between">
+      <div class="flex items-center gap-2 text-sm font-semibold text-white"><GitBranch size={15} /> pick repos to watch</div>
+      <Button variant="ghost" on:click={loadRepos} disabled={reposLoading}>
+        <span class="inline-flex items-center gap-1.5"><RefreshCw size={13} /> reload list</span>
+      </Button>
+    </div>
+
+    {#if reposLoading}
+      <p class="text-sm text-[#8b919c]">loading your repos…</p>
+    {:else if reposError}
+      <p class="mb-3 text-sm text-[#ff5d57]">{reposError}</p>
+      <label class="text-xs text-[#8b919c]">or add one manually (owner/repo)
+        <input bind:value={manualRepo} placeholder="man0l/indiestack" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
+      </label>
+    {:else if repos.length === 0}
+      <p class="text-sm text-[#8b919c]">No repos visible for this token.</p>
+    {:else}
+      <input bind:value={repoFilter} placeholder="filter…" class="mb-2 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
+      <div class="max-h-64 divide-y divide-[#262b35] overflow-y-auto rounded-lg border border-[#262b35]">
+        {#each visibleRepos() as r (r.full_name)}
+          <button type="button" class="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-[#171a21]"
+            on:click={() => toggleSelect(r.full_name)}>
+            <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded border {selected.includes(r.full_name) ? 'border-[#c8f542] bg-[#c8f542] text-black' : 'border-[#262b35]'}">
+              {#if selected.includes(r.full_name)}<Check size={12} strokeWidth={3} />{/if}
+            </span>
+            <span class="flex-1 truncate">{r.full_name}</span>
+            {#if r.private}<Badge variant="muted">private</Badge>{/if}
+            <span class="text-xs tabular-nums text-[#8b919c]">{pushedAgo(r.pushed_at)}</span>
+          </button>
+        {/each}
       </div>
-      <Button type="submit" disabled={busy !== ''}>watch deploys</Button>
-    </form>
+    {/if}
+
+    <div class="mt-3 flex items-center gap-3">
+      <label class="text-xs text-[#8b919c]">interval
+        <input type="number" bind:value={interval} min="5" max="60" class="ml-1 w-20 rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
+      </label>
+      <Button
+        disabled={busy !== '' || (selected.length === 0 && !manualRepo)}
+        on:click={() => {
+          const list = manualRepo ? [...new Set([...selected, manualRepo])] : selected;
+          api('/admin/deploys/targets/bulk', { repos: list, interval_min: interval }).then(() => {
+            selected = [];
+            manualRepo = '';
+            showAdd = null;
+          });
+        }}
+      >
+        watch {selected.length + (manualRepo ? 1 : 0)} repo(s)
+      </Button>
+      <span class="text-xs text-[#8b919c]">{repos.length} repos found · picks probe immediately</span>
+    </div>
   </Card>
 {/if}
 
-{#if showAdd === 'vercel'}
+{#if showAdd === 'vercel' && vercel.connected}
   <Card>
     <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Rocket size={15} /> watch a Vercel project</div>
     <form class="space-y-3" on:submit|preventDefault={(e) => {

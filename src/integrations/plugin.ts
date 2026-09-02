@@ -1,14 +1,17 @@
 import { redirect, toggleEnabled } from "../kernel/http";
 import type { Health, Plugin, RouteCtx, SectionCtx } from "../kernel/plugin";
 import { getSetting } from "../kernel/db";
-import { clamp } from "../kernel/util";
+import { clamp, trunc } from "../kernel/util";
 import {
   MAX_DEPLOY_TARGETS,
-  checkTargetNow,
   type DeployTarget,
+  checkTargetNow,
+  insertDeployTarget,
+  insertDeployTargetsBulk,
+  listDeployTargets,
+  listUserRepos,
   connectGithub,
   connectVercel,
-  insertDeployTarget,
   resolveVercelProject,
   scanDeploys,
 } from "./index";
@@ -85,6 +88,64 @@ export const integrations: Plugin = {
       wantsJson ? Response.json({ ok: true, msg }) : redirect(`/admin?msg=${encodeURIComponent(msg)}`);
     const jsonErr = (msg: string) =>
       wantsJson ? Response.json({ ok: false, error: msg }, { status: 400 }) : redirect(`/admin?msg=${encodeURIComponent(msg)}`);
+
+    const reposList = path === "/admin/deploys/repos" && method === "GET";
+    if (reposList) {
+      const token = await getSetting(env.DB, "github_token");
+      if (!token) return Response.json({ repos: [], error: "connect github first" }, { status: 400 });
+      try {
+        return Response.json({ repos: await listUserRepos(token) });
+      } catch (err) {
+        return Response.json({ repos: [], error: trunc(String(err), 120) }, { status: 502 });
+      }
+    }
+
+    const bulk = path === "/admin/deploys/targets/bulk" && method === "POST";
+    if (bulk) {
+      const body = (await request.json().catch(() => null)) as
+        | { repos?: string[]; interval_min?: number }
+        | null;
+      const repos = [...new Set((body?.repos ?? []).map((r) => String(r).trim()).filter(Boolean))];
+      if (!repos.length) return jsonErr("no repos selected");
+      const token = await getSetting(env.DB, "github_token");
+      if (!token) return jsonErr("connect github first");
+      const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM deploy_targets").first<{ n: number }>();
+      const existing = new Set(
+        (await listDeployTargets(env)).filter((t) => t.provider === "github").map((t) => t.repo),
+      );
+      const fresh = repos.filter((r) => !existing.has(r));
+      if (!fresh.length) return jsonErr("already watching all selected repos");
+      const room = MAX_DEPLOY_TARGETS - (count?.n ?? 0);
+      if (room <= 0) return jsonErr("max 10 deploy targets");
+      const toAdd = fresh.slice(0, Math.min(room, fresh.length));
+      const interval = clamp(Number(body?.interval_min ?? 5), 5, 60);
+      await insertDeployTargetsBulk(
+        env,
+        toAdd.map((repo) => ({
+          id: crypto.randomUUID(),
+          provider: "github" as const,
+          name: repo.split("/")[1] ?? repo,
+          repo,
+          project: null,
+          team: null,
+          interval_min: interval,
+          enabled: 1,
+          status: "unknown" as const,
+          last_check_at: null,
+          last_detail: null,
+          last_error: null,
+          consecutive: 0,
+          mute_until: null,
+          nag_min: 0,
+          last_nag_at: null,
+          created_at: Date.now(),
+        })),
+      );
+      const skipped = repos.length - toAdd.length;
+      return jsonOk(
+        `watching ${toAdd.length} repo(s)${skipped ? ` · ${skipped} skipped (already watched or no room)` : ""}`,
+      );
+    }
 
     const check = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/check$/);
     if (check && method === "POST") {

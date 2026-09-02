@@ -314,3 +314,67 @@ export async function checkTargetNow(env: Env, id: string): Promise<DeployTarget
     .run();
   return { ...t, status: next, last_check_at: Date.now(), last_detail: r.detail, last_error: r.error, consecutive };
 }
+
+/** Repos the connected GitHub token can see, most recently pushed first. */
+export async function listUserRepos(
+  token: string,
+): Promise<Array<{ full_name: string; private: boolean; pushed_at: string }>> {
+  const out: Array<{ full_name: string; private: boolean; pushed_at: string }> = [];
+  for (const page of [1, 2]) {
+    const res = await fetch(
+      `https://api.github.com/user/repos?per_page=100&sort=pushed&page=${page}&affiliation=owner,collaborator,organization_member`,
+      { headers: jsonHeaders(token) },
+    );
+    if (!res.ok) throw new Error(await readError(res));
+    const rows = (await res.json()) as Array<{
+      full_name: string;
+      private: boolean;
+      pushed_at: string;
+    }>;
+    out.push(
+      ...rows.map((r) => ({
+        full_name: r.full_name,
+        private: !!r.private,
+        pushed_at: r.pushed_at ?? "",
+      })),
+    );
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
+/** Probe + insert several targets in parallel. Returns how many were added. */
+export async function insertDeployTargetsBulk(env: Env, targets: DeployTarget[]): Promise<number> {
+  if (!targets.length) return 0;
+  const probed = await Promise.all(targets.map((t) => probeTarget(t, env)));
+  const stmts = targets.map((t, i) => {
+    const first = probed[i];
+    const status: "up" | "down" | "unknown" =
+      first.ok == null ? "unknown" : first.ok ? "up" : "down";
+    return env.DB.prepare(
+      `INSERT INTO deploy_targets (
+         id, provider, name, repo, project, team, interval_min, enabled, status,
+         last_check_at, last_detail, last_error, consecutive, mute_until, nag_min,
+         last_nag_at, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?)`,
+    ).bind(
+      t.id,
+      t.provider,
+      t.name,
+      t.repo,
+      t.project,
+      t.team,
+      t.interval_min,
+      t.enabled,
+      status,
+      Date.now(),
+      first.detail,
+      first.error,
+      t.mute_until,
+      t.nag_min,
+      t.created_at,
+    );
+  });
+  await env.DB.batch(stmts);
+  return targets.length;
+}
