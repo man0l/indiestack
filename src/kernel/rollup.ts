@@ -46,6 +46,19 @@ export async function maybeRollup(env: Env, now: number): Promise<void> {
     interval_min: number;
   }>();
 
+  const deploys = await env.DB.prepare(
+    "SELECT name, provider, repo, project, status, last_detail, last_error FROM deploy_targets",
+  ).all();
+
+  const analytics = await env.DB.prepare(
+    `SELECT s.name AS site, h.path, COUNT(*) AS views
+     FROM hits h JOIN analytics_sites s ON s.id = h.site_id
+     WHERE h.day = ?
+     GROUP BY s.id, h.path ORDER BY views DESC`,
+  )
+    .bind(yesterday)
+    .all<{ site: string; path: string; views: number }>();
+
   const body = JSON.stringify({
     date: yesterday,
     monitors: (stats.results ?? []).map((row) => {
@@ -63,6 +76,8 @@ export async function maybeRollup(env: Env, now: number): Promise<void> {
       };
     }),
     jobs: jobs.results ?? [],
+    deploys: deploys.results ?? [],
+    analytics: analytics.results ?? [],
   });
 
   await env.BUCKET.put(`rollups/${yesterday}.json`, body, {

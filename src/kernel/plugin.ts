@@ -24,6 +24,8 @@ export type TickStats = Record<string, number>;
 
 export type Plugin = {
   id: string;
+  /** Plugins this one reads tables/helpers from. Catalog order must list deps first. */
+  deps?: string[];
   route?(ctx: RouteCtx): Promise<Response | null> | Response | null;
   admin?(ctx: RouteCtx): Promise<Response | null> | Response | null;
   adminSection?(ctx: SectionCtx): Promise<string> | string;
@@ -34,7 +36,7 @@ export type Plugin = {
   statusKicker?(ctx: SectionCtx): Promise<string | null> | string | null;
   occupied?(ctx: SectionCtx): Promise<boolean> | boolean;
   health?(env: Env, now: number): Promise<Health>;
-  tick?(env: Env, now: number, webhook: string | null): Promise<TickStats>;
+  tick?(env: Env, now: number): Promise<TickStats>;
 };
 
 export async function dispatch(
@@ -92,12 +94,11 @@ export async function runPluginTicks(
   plugins: Plugin[],
   env: Env,
   now: number,
-  webhook: string | null,
 ): Promise<TickStats> {
   const acc: TickStats = { alerts: 0 };
   for (const p of plugins) {
     if (!p.tick) continue;
-    const stats = await p.tick(env, now, webhook);
+    const stats = await p.tick(env, now);
     for (const [k, v] of Object.entries(stats)) {
       acc[k] = (acc[k] ?? 0) + v;
     }

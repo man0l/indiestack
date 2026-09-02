@@ -1,5 +1,4 @@
-import { flushAlerts, sendAlert } from "../kernel/alert";
-import { getSetting } from "../kernel/db";
+import { notifyAll } from "../kernel/alert";
 import { isMuted, type Job } from "../kernel/types";
 import { agoMs } from "../kernel/util";
 
@@ -17,12 +16,9 @@ export async function recordBeat(env: Env, token: string): Promise<Job | null> {
     .bind(now, job.id)
     .run();
   if (prev === "down" && job.enabled && !isMuted(job.enabled, job.mute_until, now)) {
-    const webhook = await getSetting(env.DB, "webhook_url");
-    if (webhook) {
-      await sendAlert(webhook, `UP · ${job.name} · beat received`).catch((err) =>
-        console.error("alert failed", String(err)),
-      );
-    }
+    await notifyAll(env, [`UP · ${job.name} · beat received`]).catch((err) =>
+      console.error("alert failed", String(err)),
+    );
   }
   return { ...job, status: "up", last_beat_at: now, last_error: null, consecutive: 0 };
 }
@@ -30,7 +26,6 @@ export async function recordBeat(env: Env, token: string): Promise<Job | null> {
 export async function scanHeartbeats(
   env: Env,
   now: number,
-  webhook: string | null,
 ): Promise<{ scanned: number; alerts: number }> {
   const { results } = await env.DB.prepare(
     "SELECT * FROM jobs WHERE enabled = 1 AND (mute_until IS NULL OR mute_until <= ?)",
@@ -65,6 +60,6 @@ export async function scanHeartbeats(
   }
 
   if (stmts.length) await env.DB.batch(stmts);
-  const alerts = await flushAlerts(webhook, pendingAlerts);
+  const alerts = await notifyAll(env, pendingAlerts);
   return { scanned: jobs.length, alerts };
 }

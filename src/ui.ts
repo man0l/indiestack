@@ -257,7 +257,7 @@ export function statusPage(
     ${kicker ? `<p class="pct">${esc(kicker)}</p>` : ""}
     <p class="sub">Last 24 hours in D1.</p>
     ${emptyHtml}${sections.join("")}
-    <footer>indiestack · one project, one worker</footer>`,
+    <footer>indiestack · one project, one worker · built by <a href="https://x.com/manol_ai" target="_blank" rel="noopener">@manol_ai</a></footer>`,
     `<meta http-equiv="refresh" content="30"/>`,
   );
 }
@@ -266,7 +266,7 @@ export function adminPage(
   title: string,
   sections: string[],
   summaries: string[],
-  webhook: string,
+  settings: Record<string, string>,
   rollups: string[],
   footers: string[],
   flash?: string,
@@ -277,10 +277,13 @@ export function adminPage(
       : `<ul>${rollups
           .map((d) => `<li><a href="/admin/rollups/${esc(d)}">${esc(d)}</a></li>`)
           .join("")}</ul>`;
-  const counts = summaries.length ? `${summaries.join(" · ")} · ` : "";
+  const counts = summaries.filter(Boolean).length
+    ? `${summaries.filter(Boolean).join(" · ")} · `
+    : "";
   const footer = footers.length
     ? footers.join(" ")
     : "Mute times are UTC.";
+  const s = (key: string): string => esc(settings[key] ?? "");
   return page(
     `admin · ${title}`,
     `<header>
@@ -291,13 +294,36 @@ export function adminPage(
       </div>
     </header>
     ${flash ? `<p class="sub">${esc(flash)}</p>` : ""}
-    <p class="sub">${counts}public <a href="/">/</a></p>
+    <p class="sub">${counts}public <a href="/">/</a> · agent guide <a href="/agents.md">/agents.md</a></p>
     ${sections.join("")}
     <form class="card" method="post" action="/admin/settings">
       <label>alert webhook (discord / slack / generic JSON)
-        <input type="url" name="webhook_url" value="${esc(webhook)}" placeholder="https://discord.com/api/webhooks/…"/>
+        <input type="url" name="webhook_url" value="${s("webhook_url")}" placeholder="https://discord.com/api/webhooks/…"/>
       </label>
-      <button type="submit">save webhook</button>
+      <label>telegram bot token (optional)
+        <input type="text" name="telegram_bot_token" value="${s("telegram_bot_token")}" placeholder="123456:ABC-DEF…"/>
+      </label>
+      <label>telegram chat id (optional)
+        <input type="text" name="telegram_chat_id" value="${s("telegram_chat_id")}" placeholder="123456789"/>
+      </label>
+      <label>resend api key (optional — email alerts)
+        <input type="password" name="resend_api_key" value="${s("resend_api_key")}" placeholder="re_…"/>
+      </label>
+      <label>alert email (to, needs resend key)
+        <input type="email" name="alert_email" value="${s("alert_email")}" placeholder="you@example.com"/>
+      </label>
+      <label>alert email from (optional — resend domain)
+        <input type="email" name="alert_from" value="${s("alert_from")}" placeholder="onboarding@resend.dev"/>
+      </label>
+      <div class="actions" style="justify-content:flex-start">
+        <button type="submit">save channels</button>
+      </div>
+    </form>
+    <form class="card" method="post" action="/admin/test-alert">
+      <label>test the channels — sends one TEST text to every configured channel
+        <input type="text" readonly value="${s("last_alert_error") ? `last error: ${s("last_alert_error")}` : "no delivery errors recorded"}" spellcheck="false"/>
+      </label>
+      <button type="submit">send test alert</button>
     </form>
     <h2>rollups</h2>
     ${history}

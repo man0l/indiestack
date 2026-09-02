@@ -4,11 +4,11 @@ import { MAX_BACKUP_BYTES, backupFilename, buildBackup, parseBackup, restoreBack
 
 export const backup: Plugin = {
   id: "backup",
-  adminFooter: "Backup JSON includes tokens. Restore upserts by id and does not delete extra rows.",
+  adminFooter: "Backup JSON includes tokens. Raw analytics hits are 30-day ephemeral and not exported. Restore upserts by id and does not delete extra rows.",
   adminSection(_ctx: SectionCtx) {
     return `<h2>backup</h2>
     <div class="card">
-      <p class="sub" style="margin:0 0 12px">Download monitors, jobs, log sources, settings, checks, rollups, and recent log tails. Restore upserts those rows. Extra monitors you added after the file are kept. Settings in the file overwrite, including the admin token.</p>
+      <p class="sub" style="margin:0 0 12px">Download monitors, jobs, log sources, deploy targets, agent tokens, analytics sites, settings, checks, rollups, and recent log tails. Restore upserts those rows. Extra rows you added after the file are kept. Settings in the file overwrite, including the admin token.</p>
       <div class="actions" style="justify-content:flex-start">
         <a class="btn" href="/admin/backup.json">download JSON</a>
       </div>
@@ -50,7 +50,7 @@ export const backup: Plugin = {
         const stats = await restoreBackup(ctx.env, parsed);
         return redirect(
           `/admin?msg=${encodeURIComponent(
-            `restored ${stats.monitors} monitors · ${stats.jobs} jobs · ${stats.log_sources} logs · ${stats.checks} checks`,
+            `restored ${stats.monitors} monitors · ${stats.jobs} jobs · ${stats.log_sources} logs · ${stats.deploy_targets} deploys · ${stats.agent_tokens} agents · ${stats.analytics_sites} sites · ${stats.checks} checks`,
           )}`,
         );
       } catch (err) {

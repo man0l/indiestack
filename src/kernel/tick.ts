@@ -1,5 +1,4 @@
 import { PLUGINS } from "./catalog";
-import { getSetting } from "./db";
 import { runPluginTicks } from "./plugin";
 import { maybePrune, maybeRollup } from "./rollup";
 
@@ -8,8 +7,7 @@ export async function runTick(
 ): Promise<{ checked: number; jobs: number; alerts: number }> {
   const t0 = Date.now();
   const now = Date.now();
-  const webhook = await getSetting(env.DB, "webhook_url");
-  const stats = await runPluginTicks(PLUGINS, env, now, webhook);
+  const stats = await runPluginTicks(PLUGINS, env, now);
   await maybeRollup(env, now);
   await maybePrune(env, now);
   const checked = stats.checked ?? 0;

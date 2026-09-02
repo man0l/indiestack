@@ -6,6 +6,11 @@ import {
   safeEqual,
   setCookie,
 } from "./kernel/auth";
+import {
+  ALERT_SETTING_KEYS,
+  clearAlertError,
+  sendTestAlert,
+} from "./kernel/alert";
 import { PLUGINS } from "./kernel/catalog";
 import { getSetting, setSetting } from "./kernel/db";
 import { redirect } from "./kernel/http";
@@ -82,6 +87,14 @@ async function handle(request: Request, env: Env): Promise<Response> {
         `/admin?msg=${encodeURIComponent(`checked ${result.checked} · jobs ${result.jobs}`)}`,
       );
     }
+    if (ctx.path === "/admin/test-alert" && ctx.method === "POST") {
+      const result = await sendTestAlert(env);
+      if (result.error) {
+        return redirect(`/admin?msg=${encodeURIComponent(`test failed: ${result.error}`)}`);
+      }
+      await clearAlertError(env).catch(() => {});
+      return redirect("/admin?msg=test%20alert%20sent");
+    }
     const roll = ctx.path.match(/^\/admin\/rollups\/(\d{4}-\d{2}-\d{2})$/);
     if (roll && ctx.method === "GET") {
       const obj = await env.BUCKET.get(`rollups/${roll[1]}.json`);
@@ -122,7 +135,7 @@ async function admin(env: Env, origin: string, msg: string | null): Promise<Resp
   const sectionCtx = { env, origin, title: env.APP_NAME };
   const sections = await collect(PLUGINS, "adminSection", sectionCtx);
   const summaries = await collect(PLUGINS, "summary", sectionCtx);
-  const webhook = (await getSetting(env.DB, "webhook_url")) ?? "";
+  const settings = await loadSettings(env, [...ALERT_SETTING_KEYS, "last_alert_error"]);
   const listed = await env.BUCKET.list({ prefix: "rollups/" });
   const rollups = listed.objects
     .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
@@ -133,19 +146,44 @@ async function admin(env: Env, origin: string, msg: string | null): Promise<Resp
     "Mute times are UTC.",
   ];
   return html(
-    adminPage(env.APP_NAME, sections, summaries, webhook, rollups, footers, msg ?? undefined),
+    adminPage(env.APP_NAME, sections, summaries, settings, rollups, footers, msg ?? undefined),
   );
+}
+
+const SETTING_FORM_KEYS = [
+  "webhook_url",
+  "telegram_bot_token",
+  "telegram_chat_id",
+  "resend_api_key",
+  "alert_email",
+  "alert_from",
+];
+
+async function loadSettings(env: Env, keys: readonly string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(
+    keys.map(async (key) => {
+      out[key] = (await getSetting(env.DB, key)) ?? "";
+    }),
+  );
+  return out;
 }
 
 async function saveSettings(request: Request, env: Env): Promise<Response> {
   const form = await request.formData();
-  const webhook = String(form.get("webhook_url") ?? "").trim();
-  if (webhook) {
-    const parsed = parseHttpUrl(webhook);
-    if (!parsed) return redirect("/admin?msg=bad%20webhook");
-    await setSetting(env.DB, "webhook_url", parsed.toString());
-  } else {
-    await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind("webhook_url").run();
+  for (const key of SETTING_FORM_KEYS) {
+    const value = String(form.get(key) ?? "").trim();
+    if (key === "webhook_url" && value) {
+      const parsed = parseHttpUrl(value);
+      if (!parsed) return redirect("/admin?msg=bad%20webhook");
+      await setSetting(env.DB, key, parsed.toString());
+      continue;
+    }
+    if (value) {
+      await setSetting(env.DB, key, value.slice(0, 200));
+    } else {
+      await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
+    }
   }
   return redirect("/admin?msg=saved");
 }

@@ -47,8 +47,8 @@ export const heartbeat: Plugin = {
       last: row?.last ?? null,
     };
   },
-  async tick(env, now, webhook) {
-    const r = await scanHeartbeats(env, now, webhook);
+  async tick(env, now) {
+    const r = await scanHeartbeats(env, now);
     return { jobs: r.scanned, alerts: r.alerts };
   },
   async route(ctx: RouteCtx) {

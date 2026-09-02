@@ -211,8 +211,8 @@ export const ping: Plugin = {
       last: row?.last ?? null,
     };
   },
-  async tick(env, now, webhook) {
-    const r = await runPings(env, now, webhook);
+  async tick(env, now) {
+    const r = await runPings(env, now);
     return { checked: r.checked, alerts: r.alerts };
   },
   async admin(ctx: RouteCtx) {
