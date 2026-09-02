@@ -183,7 +183,9 @@ async function renderAdminPage(
   const now = Date.now();
   const cards = await collectNavCards(env, now);
   let content: string;
+  let island: string | null = null;
   if (activeId === "overview") {
+    island = "overview";
     content = overviewCards(cards);
   } else if (activeId === "settings") {
     const settings = await loadSettings(env, [...ALERT_SETTING_KEYS, "last_alert_error"]);
@@ -198,11 +200,10 @@ async function renderAdminPage(
     if (!plugin || !plugin.adminSection) content = `<p class="sub">Not found.</p>`;
     else content = await plugin.adminSection({ env, origin, title: env.APP_NAME });
     if (plugin?.adminFooter) content += `<footer>${plugin.adminFooter}</footer>`;
+    // Islands exist per plugin; the Svelte bundle replaces this div's content on mount.
+    if (["ping"].includes(activeId)) island = activeId;
   }
-  if (activeId !== "overview" && activeId !== "settings") {
-    // shared settings are still reachable from the system page, not inside each plugin's own content
-  }
-  return html(adminShell({ title: env.APP_NAME, activeId, cards, content, flash: msg ?? undefined }));
+  return html(adminShell({ title: env.APP_NAME, activeId, cards, content, flash: msg ?? undefined, island }));
 }
 
 function overviewCards(cards: Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }>): string {

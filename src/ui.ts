@@ -319,6 +319,7 @@ export function adminShell(opts: {
   cards: AdminCard[];
   content: string;
   flash?: string;
+  island?: string | null;
 }): string {
   const groups = ["monitoring", "growth", "distribute", "system"] as const;
   const groupLabels: Record<string, string> = {
@@ -327,7 +328,7 @@ export function adminShell(opts: {
     distribute: "distribute",
     system: "system",
   };
-  const sidebar = `<nav class="sidebar">
+  const sidebar = `<aside class="sidebar">
     <div class="sbrand">${opts.title} <span>admin</span></div>
     <a class="sitem ${opts.activeId === "overview" ? "active" : ""}" href="/admin">overview</a>
     ${groups.map((g) => {
@@ -341,23 +342,21 @@ export function adminShell(opts: {
     <a class="sitem" href="/">status ↗</a>
     <a class="sitem" href="/agents.md">/agents.md</a>
     <form method="post" action="/logout" style="margin-top:10px"><button class="sghost" type="submit">logout</button></form>
-  </nav>`;
-    let pcap = `</style>`;
-    pcap += `<script type="module" src="/_app/admin.js"></script>`;
-    return page(
-      `admin · ${opts.title}`,
-      `<div id="app" class="admin">
-        ${sidebar}
-        <div class="amain">
-          <div class="ahead">
-            <form method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
-            ${opts.flash ? `<span class="flash">${esc(opts.flash)}</span>` : ""}
-          </div>
-          ${opts.content}
+  </aside>`;
+  return page(
+    `admin · ${opts.title}`,
+    `<div class="admin">
+      ${sidebar}
+      <div class="amain">
+        <div class="ahead">
+          <form method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
+          ${opts.flash ? `<span class="flash">${esc(opts.flash)}</span>` : ""}
         </div>
-      </div>`,
-      `<style>main{max-width:none;margin:0;padding:0;background:transparent}${pcap}</style>`,
-    );
+        <div ${opts.island ? `data-island="${esc(opts.island)}"` : ""}>${opts.content}</div>
+      </div>
+    </div>`,
+    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><script type="module" src="/_app/admin.js"></script>`,
+  );
 }
 
 export function settingsCard(settings: Record<string, string>, rollups: string[]): string {
