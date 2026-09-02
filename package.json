@@ -4,13 +4,21 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "wrangler d1 migrations apply DB --local && wrangler dev --test-scheduled",
-    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "build": "vite build",
+    "dev": "vite build && wrangler d1 migrations apply DB --local && wrangler dev --test-scheduled",
+    "deploy": "vite build && for f in dist/admin/_app/*; do npx wrangler r2 object put indiestack/assets/$(basename $f) --file=$f --remote >/dev/null 2>&1; done && wrangler d1 migrations apply DB --remote && wrangler deploy",
     "types": "wrangler types",
     "check": "wrangler types && tsc --noEmit"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "autoprefixer": "^10.5.4",
+    "lucide-svelte": "^1.0.1",
+    "postcss": "^8.5.26",
+    "svelte": "^5.57.0",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.9.2",
+    "vite": "^6.4.3",
     "wrangler": "^4.34.0"
   },
   "cloudflare": {
