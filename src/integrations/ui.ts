@@ -57,7 +57,8 @@ export function adminDeploys(
     "https://github.com/settings/personal-access-tokens/new" +
     "?name=IndieStack%20deploys" +
     "&description=Read-only%20deployment%20status%20for%20IndieStack" +
-    "&permissions%5Bdeployments%5D=read";
+    "&permissions%5Bdeployments%5D=read" +
+    "&expiration=none";
   const vercelTokenUrl = "https://vercel.com/account/tokens";
 
   const addGithub = github.connected
@@ -106,7 +107,7 @@ export function adminDeploys(
       githubTokenUrl,
       "create a pre-filled read-only token",
       github,
-      "The link pre-selects <b>Deployments: read-only</b> — nothing else. Public repos work without any token (just slower); private repos need one.",
+      "The link pre-selects <b>Deployments: read-only</b> and <b>no expiration</b> — nothing expires, nothing else is granted. Prefer 30/90 days? Change Expiration in the form. Public repos work without any token (just slower); disconnect here revokes instantly.",
     )}
     ${addGithub}
     ${connect(
@@ -115,7 +116,7 @@ export function adminDeploys(
       vercelTokenUrl,
       "create a token",
       vercel,
-      "Vercel has no prefill: in the modal pick Scope → your account or team, any expiration. IndieStack only calls read endpoints.",
+      "Vercel has no prefill: in the modal pick Scope → your account or team, and Expiration (no-expiration is fine — revoke here anytime). IndieStack only calls read endpoints.",
     )}
     ${addVercel}`;
 }
