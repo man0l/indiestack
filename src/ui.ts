@@ -354,7 +354,7 @@ export function adminShell(opts: {
         ${opts.content}
       </div>
     </div>`,
-    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style>`,
+    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><script type="module" src="/_app/admin-CN-NnnvT.js"></script>`,
   );
 }
 
