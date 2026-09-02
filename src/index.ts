@@ -52,7 +52,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const name = ctx.path.slice(6);
     if (!name.includes("..") && !name.includes("\\")) {
       const obj = await env.BUCKET.get(`assets/${name}`);
-      if (obj) return new Response(obj.body, { headers: { "content-type": obj.httpMetadata?.contentType ?? "application/javascript", "cache-control": "public, max-age=31536000, immutable" } });
+      if (obj) return new Response(obj.body, { headers: { "content-type": obj.httpMetadata?.contentType ?? "application/javascript", "cache-control": "no-cache" } });
     }
   }
 

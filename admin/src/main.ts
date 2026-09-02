@@ -77,10 +77,6 @@ function onClick(e: MouseEvent) {
 }
 
 document.addEventListener('click', onClick);
-document.addEventListener('submit', (e) => {
-  const f = e.target as HTMLElement;
-  if (f.id === 'check-form') return; // handled by bindCheckForm
-});
 window.addEventListener('popstate', () => navigate(location.pathname, false));
 
 // First load: hydrate server-rendered islands + wire the shell for SPA nav
