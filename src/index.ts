@@ -68,6 +68,13 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const monitors = await env.DB.prepare("SELECT * FROM monitors ORDER BY created_at").all();
     return Response.json({ monitors: monitors.results ?? [] });
   }
+  const apiPage = ctx.path.match(/^\/api\/page\/([\w-]+)$/);
+  if (apiPage && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const page = await buildAdminPage(env, ctx.origin, apiPage[1]);
+    return Response.json(page);
+  }
 
   if (ctx.path === "/health.json" && ctx.method === "GET") {
     return healthJson(env);
@@ -174,16 +181,16 @@ async function adminSettingsPage(env: Env, origin: string, msg: string | null): 
   return renderAdminPage(env, origin, "settings", msg);
 }
 
-async function renderAdminPage(
+async function buildAdminPage(
   env: Env,
   origin: string,
   activeId: string,
-  msg: string | null,
-): Promise<Response> {
+): Promise<{ activeId: string; cards: any[]; content: string; island: string | null; footer: string | null }> {
   const now = Date.now();
   const cards = await collectNavCards(env, now);
   let content: string;
   let island: string | null = null;
+  let footer: string | null = null;
   if (activeId === "overview") {
     island = "overview";
     content = overviewCards(cards);
@@ -199,11 +206,21 @@ async function renderAdminPage(
     const plugin = PLUGINS.find((p) => p.id === activeId);
     if (!plugin || !plugin.adminSection) content = `<p class="sub">Not found.</p>`;
     else content = await plugin.adminSection({ env, origin, title: env.APP_NAME });
-    if (plugin?.adminFooter) content += `<footer>${plugin.adminFooter}</footer>`;
+    footer = plugin?.adminFooter ?? null;
     // Islands exist per plugin; the Svelte bundle replaces this div's content on mount.
     if (["ping"].includes(activeId)) island = activeId;
   }
-  return html(adminShell({ title: env.APP_NAME, activeId, cards, content, flash: msg ?? undefined, island }));
+  return { activeId, cards, content, island, footer };
+}
+
+async function renderAdminPage(
+  env: Env,
+  origin: string,
+  activeId: string,
+  msg: string | null,
+): Promise<Response> {
+  const page = await buildAdminPage(env, origin, activeId);
+  return html(adminShell({ title: env.APP_NAME, activeId: page.activeId, cards: page.cards, content: page.content, flash: msg ?? undefined, island: page.island }));
 }
 
 function overviewCards(cards: Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }>): string {

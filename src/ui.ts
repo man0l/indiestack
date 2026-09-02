@@ -349,7 +349,7 @@ export function adminShell(opts: {
       ${sidebar}
       <div class="amain">
         <div class="ahead">
-          <form method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
+          <form id="check-form" method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
           ${opts.flash ? `<span class="flash">${esc(opts.flash)}</span>` : ""}
         </div>
         <div ${opts.island ? `data-island="${esc(opts.island)}"` : ""}>${opts.content}</div>
