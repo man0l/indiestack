@@ -4,6 +4,7 @@ import { getSetting } from "../kernel/db";
 import { clamp } from "../kernel/util";
 import {
   MAX_DEPLOY_TARGETS,
+  checkTargetNow,
   type DeployTarget,
   connectGithub,
   connectVercel,
@@ -79,6 +80,19 @@ export const integrations: Plugin = {
   },
   async admin(ctx: RouteCtx) {
     const { path, method, env, request } = ctx;
+    const wantsJson = (request.headers.get("accept") ?? "").includes("application/json");
+    const jsonOk = (msg: string) =>
+      wantsJson ? Response.json({ ok: true, msg }) : redirect(`/admin?msg=${encodeURIComponent(msg)}`);
+    const jsonErr = (msg: string) =>
+      wantsJson ? Response.json({ ok: false, error: msg }, { status: 400 }) : redirect(`/admin?msg=${encodeURIComponent(msg)}`);
+
+    const check = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/check$/);
+    if (check && method === "POST") {
+      const t = await checkTargetNow(env, check[1]);
+      if (!t && wantsJson) return Response.json({ ok: false, error: "not found" }, { status: 404 });
+      if (wantsJson) return Response.json({ ok: true, target: t });
+      return redirect("/admin?msg=checked");
+    }
 
     const connect = path.match(/^\/admin\/deploys\/(github|vercel)\/connect$/);
     if (connect && method === "POST") {
@@ -96,11 +110,9 @@ export const integrations: Plugin = {
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
           ).bind(`${provider}_user`, who),
         ]);
-        return redirect(`/admin?msg=${encodeURIComponent(`connected as ${who}`)}`);
+        return jsonOk(`connected as ${who}`);
       } catch (err) {
-        return redirect(
-          `/admin?msg=${encodeURIComponent(`token rejected: ${String(err).slice(0, 80)}`)}`,
-        );
+        return jsonErr(`token rejected: ${String(err).slice(0, 80)}`);
       }
     }
 
@@ -111,7 +123,7 @@ export const integrations: Plugin = {
         env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(`${p}_token`),
         env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(`${p}_user`),
       ]);
-      return redirect("/admin?msg=disconnected");
+      return jsonOk("disconnected");
     }
 
     if (path === "/admin/deploys/targets" && method === "POST") {
@@ -121,13 +133,13 @@ export const integrations: Plugin = {
       const projectRaw = String(form.get("project") ?? "").trim();
       const team = String(form.get("team") ?? "").trim();
       if (provider === "github" ? !repo : !projectRaw) {
-        return redirect("/admin?msg=repo%20or%20project%20required");
+        return jsonErr("repo or project required");
       }
       const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM deploy_targets").first<{
         n: number;
       }>();
       if ((count?.n ?? 0) >= MAX_DEPLOY_TARGETS) {
-        return redirect("/admin?msg=max%2010%20deploy%20targets");
+        return jsonErr("max 10 deploy targets");
       }
       // Vercel: accept a project slug or id, store the canonical id so the
       // deployments query always matches.
@@ -135,10 +147,10 @@ export const integrations: Plugin = {
       let resolvedName = "";
       if (provider === "vercel") {
         const token = await getSetting(env.DB, "vercel_token");
-        if (!token) return redirect("/admin?msg=connect%20vercel%20first");
+        if (!token) return jsonErr("connect vercel first");
         const resolved = await resolveVercelProject(token, team || null, projectRaw);
         if (!resolved) {
-          return redirect("/admin?msg=project%20not%20found%20(check%20name%20or%20team)");
+          return jsonErr("project not found (check name or team)");
         }
         project = resolved.id;
         resolvedName = resolved.name;
@@ -166,19 +178,19 @@ export const integrations: Plugin = {
         created_at: Date.now(),
       };
       await insertDeployTarget(env, target);
-      return redirect("/admin?msg=deploy%20target%20added");
+      return jsonOk(`added ${target.name} — first check done`);
     }
 
     const tog = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/toggle$/);
     if (tog && method === "POST") {
       await toggleEnabled(env.DB, "deploy_targets", tog[1]);
-      return redirect("/admin?msg=toggled");
+      return jsonOk("toggled");
     }
 
     const del = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/delete$/);
     if (del && method === "POST") {
       await env.DB.prepare("DELETE FROM deploy_targets WHERE id = ?").bind(del[1]).run();
-      return redirect("/admin?msg=removed");
+      return jsonOk("removed");
     }
 
     return null;

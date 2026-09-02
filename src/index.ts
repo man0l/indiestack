@@ -16,6 +16,7 @@ import { getSetting, setSetting } from "./kernel/db";
 import { redirect } from "./kernel/http";
 import { collect, dispatch, firstKicker, sumHealth } from "./kernel/plugin";
 import { runTick } from "./kernel/tick";
+import { deployOverview } from "./integrations";
 import { parseHttpUrl } from "./kernel/util";
 import { adminShell, ago, html, loginPage, overallOf, revealPage, settingsCard, statusPage } from "./ui";
 
@@ -67,6 +68,11 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (gate) return gate;
     const monitors = await env.DB.prepare("SELECT * FROM monitors ORDER BY created_at").all();
     return Response.json({ monitors: monitors.results ?? [] });
+  }
+  if (ctx.path === "/api/deploys" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    return Response.json(await deployOverview(env));
   }
   const apiPage = ctx.path.match(/^\/api\/page\/([\w-]+)$/);
   if (apiPage && ctx.method === "GET") {
@@ -208,7 +214,7 @@ async function buildAdminPage(
     else content = await plugin.adminSection({ env, origin, title: env.APP_NAME });
     footer = plugin?.adminFooter ?? null;
     // Islands exist per plugin; the Svelte bundle replaces this div's content on mount.
-    if (["ping"].includes(activeId)) island = activeId;
+    if (["ping", "integrations"].includes(activeId)) island = activeId;
   }
   return { activeId, cards, content, island, footer };
 }

@@ -270,3 +270,47 @@ export async function insertDeployTarget(env: Env, t: DeployTarget): Promise<voi
     )
     .run();
 }
+
+export async function listDeployTargets(env: Env): Promise<DeployTarget[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT * FROM deploy_targets ORDER BY created_at ASC",
+  ).all<DeployTarget>();
+  return results ?? [];
+}
+
+export async function deployOverview(env: Env): Promise<{
+  targets: DeployTarget[];
+  github: { connected: boolean; who: string | null };
+  vercel: { connected: boolean; who: string | null };
+}> {
+  const [targets, githubUser, vercelUser] = await Promise.all([
+    listDeployTargets(env),
+    getSetting(env.DB, "github_user"),
+    getSetting(env.DB, "vercel_user"),
+  ]);
+  return {
+    targets,
+    github: { connected: githubUser != null, who: githubUser },
+    vercel: { connected: vercelUser != null, who: vercelUser },
+  };
+}
+
+/** Manual "check now": probe one target immediately and persist the result. */
+export async function checkTargetNow(env: Env, id: string): Promise<DeployTarget | null> {
+  const t = await env.DB.prepare("SELECT * FROM deploy_targets WHERE id = ?")
+    .bind(id)
+    .first<DeployTarget>();
+  if (!t) return null;
+  const r = await probeTarget(t, env);
+  const next: "up" | "down" | "unknown" =
+    r.ok == null ? t.status : r.ok ? "up" : "down";
+  const consecutive = r.ok == null ? t.consecutive : next === t.status ? t.consecutive + 1 : 1;
+  await env.DB.prepare(
+    `UPDATE deploy_targets SET
+       status = ?, last_check_at = ?, last_detail = ?, last_error = ?, consecutive = ?
+     WHERE id = ?`,
+  )
+    .bind(next, Date.now(), r.detail, r.error, consecutive, t.id)
+    .run();
+  return { ...t, status: next, last_check_at: Date.now(), last_detail: r.detail, last_error: r.error, consecutive };
+}

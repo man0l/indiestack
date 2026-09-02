@@ -2,10 +2,11 @@ import './app.css';
 import { mount } from 'svelte';
 import Overview from './lib/Overview.svelte';
 import Ping from './lib/plugins/Ping.svelte';
+import Deploys from './lib/plugins/Deploys.svelte';
 
 // Islands: the Worker serves the shell (sidebar + content) as server HTML.
 // The router swaps .amain content via /api/page/:id and mounts islands — no reloads.
-const islands: Record<string, any> = { overview: Overview, ping: Ping };
+const islands: Record<string, any> = { overview: Overview, ping: Ping, deploys: Deploys };
 
 function mountIslands(root: ParentNode) {
   for (const el of root.querySelectorAll<HTMLElement>('[data-island]')) {
