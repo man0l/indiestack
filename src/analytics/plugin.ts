@@ -26,6 +26,7 @@ async function readBody(request: Request): Promise<string> {
 
 export const analytics: Plugin = {
   id: "analytics",
+  adminNav: { group: "growth", label: "analytics" },
   adminFooter: "Analytics is cookie-free, capped at 2,000 views/site/day, 30-day retention in D1.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM analytics_sites").first<{

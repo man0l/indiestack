@@ -5,6 +5,7 @@ import { adminAgents } from "./ui";
 
 export const agents: Plugin = {
   id: "agents",
+  adminNav: { group: "distribute", label: "ai agents" },
   adminFooter: "Agent tokens are read-only. Revoke replaces the token the agent knows.",
   async adminSection(ctx: SectionCtx) {
     return adminAgents(await listAgentTokens(ctx.env.DB), ctx.origin);

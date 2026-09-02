@@ -40,6 +40,7 @@ function list(rows: Array<Record<string, unknown>>, key: string, label: string):
 
 export const share: Plugin = {
   id: "share",
+  adminNav: { group: "distribute", label: "share" },
   deps: ["analytics", "goals"],
   adminFooter: "Share links are public: visitors see views, uniques, top paths, referrers and goals — never raw visitor data.",
   async adminSection(ctx: SectionCtx) {

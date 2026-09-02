@@ -27,6 +27,7 @@ function badge(parts: Array<{ text: string; color: string; bg: string }>): strin
 
 export const widgets: Plugin = {
   id: "widgets",
+  adminNav: { group: "distribute", label: "widgets" },
   deps: ["analytics"],
   adminFooter: "Widgets are public images — anyone with the URL can read the number it shows.",
   adminSection(ctx: SectionCtx) {

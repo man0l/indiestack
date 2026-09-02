@@ -5,6 +5,7 @@ import { classifyCrawler, crawlSummary, ingestSnippet, maybePruneCrawls } from "
 
 export const aicrawl: Plugin = {
   id: "aicrawl",
+  adminNav: { group: "growth", label: "ai crawlers" },
   deps: ["analytics"],
   adminFooter: "AI crawlers are recorded server-side — paste the middleware into the Workers you own. Other bots land under other-bot.",
   async adminSection(ctx: SectionCtx) {

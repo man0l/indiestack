@@ -4,6 +4,7 @@ import { MAX_BACKUP_BYTES, backupFilename, buildBackup, parseBackup, restoreBack
 
 export const backup: Plugin = {
   id: "backup",
+  adminNav: { group: "system", label: "backup" },
   adminFooter: "Backup JSON includes tokens. Raw analytics hits are 30-day ephemeral and not exported. Restore upserts by id and does not delete extra rows.",
   adminSection(_ctx: SectionCtx) {
     return `<h2>backup</h2>

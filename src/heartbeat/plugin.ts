@@ -13,6 +13,7 @@ export async function listJobs(db: D1Database): Promise<Job[]> {
 
 export const heartbeat: Plugin = {
   id: "heartbeat",
+  adminNav: { group: "monitoring", label: "heartbeats" },
   adminFooter: "A heartbeat alerts on the first miss after grace.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM jobs").first<{ n: number }>();

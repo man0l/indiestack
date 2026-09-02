@@ -167,6 +167,48 @@ export function page(title: string, body: string, extraHead = ""): string {
     details.fold > summary::before { content: "+  "; }
     details.fold[open] > summary::before { content: "–  "; }
     details.fold .card { margin-top: 8px; }
+    
+    /* admin shell — sidebar + cards (linear dark) */
+    .admin { display: flex; min-height: 100dvh; }
+    .sidebar {
+      width: 220px; min-width: 220px; flex-shrink: 0;
+      background: #0c0d10; border-right: 1px solid var(--line);
+      padding: 16px 12px; position: sticky; top: 0; height: 100dvh; overflow-y: auto;
+    }
+    .sbrand { font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
+    .sbrand span { color: var(--mute); font-weight: 500; }
+    .sg { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); margin: 14px 0 6px; }
+    .sitem {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px; border-radius: 7px; color: #a8adb7; font-size: 13px; text-decoration: none;
+    }
+    .sitem:hover { background: #171a21; color: var(--ink); text-decoration: none; }
+    .sitem.active { background: #171a21; color: var(--ink); }
+    .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--mute); flex-shrink: 0; }
+    .sdot.up { background: var(--up); }
+    .sdot.down { background: var(--down); }
+    .scount { margin-left: auto; color: var(--mute); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .amain { flex: 1; min-width: 0; padding: 20px 22px 56px; }
+    .ahead { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .flash { color: var(--mute); font-size: 13px; }
+    .sghost { background: transparent; color: var(--mute); border: 1px solid var(--line); padding: 6px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .pcard {
+      display: block; text-decoration: none; color: inherit;
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+    }
+    .pcard:hover { text-decoration: none; border-color: #2f3544; }
+    .pcard b { display: block; font-size: 14px; }
+    .pcard .sub { margin: 6px 0 0; font-size: 13px; }
+    .pcard .dot { display: inline-block; vertical-align: middle; margin-right: 6px; }
+
+    @media (max-width: 820px) {
+      .admin { flex-direction: column; }
+      .sidebar { width: auto; min-width: 0; height: auto; position: static; display: flex; gap: 8px; overflow-x: auto; white-space: nowrap; }
+      .sidebar .sg { display: none; }
+      .amain { padding: 16px; }
+    }
+
     @media (max-width: 560px) {
       h1 { font-size: 32px; }
       .row { grid-template-columns: 14px 1fr; }
@@ -262,114 +304,94 @@ export function statusPage(
   );
 }
 
-export function adminPage(
-  title: string,
-  sections: string[],
-  summaries: string[],
-  settings: Record<string, string>,
-  rollups: string[],
-  footers: string[],
-  flash?: string,
-): string {
-  const history =
-    rollups.length === 0
-      ? `<p class="sub">Daily JSON land in R2 after midnight UTC.</p>`
-      : `<ul>${rollups
-          .map((d) => `<li><a href="/admin/rollups/${esc(d)}">${esc(d)}</a></li>`)
-          .join("")}</ul>`;
-  const counts = summaries.filter(Boolean).length
-    ? `${summaries.filter(Boolean).join(" · ")} · `
-    : "";
-  const footer = footers.length
-    ? footers.join(" ")
-    : "Mute times are UTC.";
-  const s = (key: string): string => esc(settings[key] ?? "");
+export type AdminCard = {
+  id: string;
+  label: string;
+  group: string;
+  summary: string;
+  dot: string;
+  href: string;
+};
+
+export function adminShell(opts: {
+  title: string;
+  activeId: string;
+  cards: AdminCard[];
+  content: string;
+  flash?: string;
+}): string {
+  const groups = ["monitoring", "growth", "distribute", "system"] as const;
+  const groupLabels: Record<string, string> = {
+    monitoring: "monitoring",
+    growth: "growth",
+    distribute: "distribute",
+    system: "system",
+  };
+  const sidebar = `<nav class="sidebar">
+    <div class="sbrand">${opts.title} <span>admin</span></div>
+    <a class="sitem ${opts.activeId === "overview" ? "active" : ""}" href="/admin">overview</a>
+    ${groups.map((g) => {
+      const items = opts.cards.filter((c) => c.group === g);
+      if (!items.length) return "";
+      return `<div class="sg">${esc(groupLabels[g])}</div>` + items.map((c) =>
+        `<a class="sitem ${opts.activeId === c.id ? "active" : ""}" href="${esc(c.href)}"><span class="sdot ${esc(c.dot)}"></span>${esc(c.label)}${c.summary ? `<span class="scount">${esc(c.summary)}</span>` : ""}</a>`
+      ).join("");
+    }).join("")}
+    <div class="sg">elsewhere</div>
+    <a class="sitem" href="/">status ↗</a>
+    <a class="sitem" href="/agents.md">/agents.md</a>
+    <form method="post" action="/logout" style="margin-top:10px"><button class="sghost" type="submit">logout</button></form>
+  </nav>`;
   return page(
-    `admin · ${title}`,
-    `<header>
-      <div class="brand">${esc(title)} <span>admin</span></div>
-      <div class="actions">
-        <form method="post" action="/admin/check"><button type="submit">check now</button></form>
-        <form method="post" action="/logout"><button class="ghost" type="submit">logout</button></form>
+    `admin · ${opts.title}`,
+    `<div class="admin">
+      ${sidebar}
+      <div class="amain">
+        <div class="ahead">
+          <form method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
+          ${opts.flash ? `<span class="flash">${esc(opts.flash)}</span>` : ""}
+        </div>
+        ${opts.content}
       </div>
-    </header>
-    ${flash ? `<p class="sub">${esc(flash)}</p>` : ""}
-    <p class="sub">${counts}public <a href="/">/</a> · agent guide <a href="/agents.md">/agents.md</a></p>
-    ${sections.join("")}
-    <form class="card" method="post" action="/admin/settings">
-      <label>alert webhook (discord / slack / generic JSON)
-        <input type="url" name="webhook_url" value="${s("webhook_url")}" placeholder="https://discord.com/api/webhooks/…"/>
-      </label>
-      <label>telegram bot token (optional)
-        <input type="text" name="telegram_bot_token" value="${s("telegram_bot_token")}" placeholder="123456:ABC-DEF…"/>
-      </label>
-      <label>telegram chat id (optional)
-        <input type="text" name="telegram_chat_id" value="${s("telegram_chat_id")}" placeholder="123456789"/>
-      </label>
-      <label>resend api key (optional — email alerts)
-        <input type="password" name="resend_api_key" value="${s("resend_api_key")}" placeholder="re_…"/>
-      </label>
-      <label>alert email (to, needs resend key)
-        <input type="email" name="alert_email" value="${s("alert_email")}" placeholder="you@example.com"/>
-      </label>
-      <label>alert email from (optional — resend domain)
-        <input type="email" name="alert_from" value="${s("alert_from")}" placeholder="onboarding@resend.dev"/>
-      </label>
-      <div class="actions" style="justify-content:flex-start">
-        <button type="submit">save channels</button>
-      </div>
-    </form>
-    <form class="card" method="post" action="/admin/test-alert">
-      <label>test the channels — sends one TEST text to every configured channel
-        <input type="text" readonly value="${s("last_alert_error") ? `last error: ${s("last_alert_error")}` : "no delivery errors recorded"}" spellcheck="false"/>
-      </label>
-      <button type="submit">send test alert</button>
-    </form>
-    <h2>rollups</h2>
-    ${history}
-    <footer>${esc(footer)}</footer>`,
-    foldScript(),
+    </div>`,
+    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style>`,
   );
 }
 
-function foldScript(): string {
-  return `<script>
-document.addEventListener("DOMContentLoaded", function () {
-  var PREFIX = "indie.fold:";
-  function labelFor(el) {
-    var actions = el.querySelectorAll("button[type=submit], a.btn");
-    if (actions.length === 1 && actions[0].textContent.trim()) return actions[0].textContent.trim();
-    var n = el.previousElementSibling;
-    while (n) {
-      if (n.tagName === "H2") return n.textContent.trim();
-      n = n.previousElementSibling;
-    }
-    return "expand";
-  }
-  function foldId(el) {
-    return el.getAttribute("action")
-      || (el.querySelector("form") && el.querySelector("form").getAttribute("action"))
-      || (el.querySelector("a.btn") && el.querySelector("a.btn").getAttribute("href"))
-      || "card";
-  }
-  document.querySelectorAll("form.card, div.card").forEach(function (el) {
-    if (el.closest("details.fold")) return;
-    if (el.tagName === "DIV" && !el.querySelector("form, a.btn")) return;
-    var id = foldId(el);
-    var wrap = document.createElement("details");
-    wrap.className = "fold";
-    var sum = document.createElement("summary");
-    sum.textContent = labelFor(el);
-    wrap.appendChild(sum);
-    el.parentNode.insertBefore(wrap, el);
-    wrap.appendChild(el);
-    wrap.open = localStorage.getItem(PREFIX + id) === "1";
-    wrap.addEventListener("toggle", function () {
-      localStorage.setItem(PREFIX + id, wrap.open ? "1" : "0");
-    });
-  });
-});
-</script>`;
+export function settingsCard(settings: Record<string, string>, rollups: string[]): string {
+  const s = (k: string) => esc(settings[k] ?? "");
+  const history = rollups.length === 0
+    ? `<p class="sub">Daily JSON land in R2 after midnight UTC.</p>`
+    : `<ul>${rollups.map((d) => `<li><a href="/admin/rollups/${esc(d)}">${esc(d)}</a></li>`).join("")}</ul>`;
+  return `<form class="card" method="post" action="/admin/settings">
+    <label>alert webhook (discord / slack / generic JSON)
+      <input type="url" name="webhook_url" value="${s("webhook_url")}" placeholder="https://discord.com/api/webhooks/…"/>
+    </label>
+    <label>telegram bot token (optional)
+      <input type="text" name="telegram_bot_token" value="${s("telegram_bot_token")}" placeholder="123456:ABC-DEF…"/>
+    </label>
+    <label>telegram chat id (optional)
+      <input type="text" name="telegram_chat_id" value="${s("telegram_chat_id")}" placeholder="123456789"/>
+    </label>
+    <label>resend api key (optional — email alerts)
+      <input type="password" name="resend_api_key" value="${s("resend_api_key")}" placeholder="re_…"/>
+    </label>
+    <label>alert email (to, needs resend key)
+      <input type="email" name="alert_email" value="${s("alert_email")}" placeholder="you@example.com"/>
+    </label>
+    <label>alert email from (optional — resend domain)
+      <input type="email" name="alert_from" value="${s("alert_from")}" placeholder="onboarding@resend.dev"/>
+    </label>
+    <button type="submit">save channels</button>
+  </form>
+  <form class="card" method="post" action="/admin/test-alert">
+    <label>test the channels — sends one TEST text to every configured channel
+      <input type="text" readonly value="${s("last_alert_error") ? `last error: ${s("last_alert_error")}` : "no delivery errors recorded"}" spellcheck="false"/>
+    </label>
+    <button type="submit">send test alert</button>
+  </form>
+  <h2>rollups</h2>
+  ${history}`;
 }
 
 export function overallOf(health: { up: number; down: number; unknown: number }): {

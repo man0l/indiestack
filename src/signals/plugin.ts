@@ -10,6 +10,7 @@ function keyHint(configured: boolean): string {
 
 export const signals: Plugin = {
   id: "signals",
+  adminNav: { group: "growth", label: "signals" },
   deps: ["analytics"],
   adminFooter: "Signals poll every 15 minutes. X needs a bearer key; Reddit needs a script-type app id/secret; GitHub reuses the deploy token.",
   async adminSection(ctx: SectionCtx) {

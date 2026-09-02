@@ -86,6 +86,7 @@ function money(cents: number, currency: string): string {
 
 export const revenue: Plugin = {
   id: "revenue",
+  adminNav: { group: "growth", label: "revenue" },
   deps: ["analytics"],
   adminFooter: "Payments attribute to the first referrer of the identified visitor. Revenue numbers leave your Worker only via your own dashboard links.",
   async adminSection(ctx: SectionCtx) {

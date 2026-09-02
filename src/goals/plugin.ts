@@ -80,6 +80,7 @@ export async function listGoals(db: D1Database): Promise<Goal[]> {
 
 export const goals: Plugin = {
   id: "goals",
+  adminNav: { group: "growth", label: "goals" },
   deps: ["analytics"],
   adminFooter: "Event goals match df.track('name') events; path goals match a page path. Rate is uniques who converted over all uniques.",
   async adminSection(ctx: SectionCtx) {

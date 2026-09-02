@@ -22,6 +22,7 @@ async function listTargets(db: D1Database): Promise<DeployTarget[]> {
 
 export const integrations: Plugin = {
   id: "integrations",
+  adminNav: { group: "monitoring", label: "deploys" },
   adminFooter: "Deploys alert on the first failed production deploy. Tokens live in your settings, never leave the Worker.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM deploy_targets").first<{

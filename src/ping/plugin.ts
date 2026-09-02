@@ -142,6 +142,7 @@ async function updateMonitor(id: string, request: Request, env: Env): Promise<Re
 
 export const ping: Plugin = {
   id: "ping",
+  adminNav: { group: "monitoring", label: "monitors" },
   adminFooter: "HTTP uses 2-strike alerts.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM monitors").first<{ n: number }>();

@@ -17,7 +17,7 @@ import { redirect } from "./kernel/http";
 import { collect, dispatch, firstKicker, sumHealth } from "./kernel/plugin";
 import { runTick } from "./kernel/tick";
 import { parseHttpUrl } from "./kernel/util";
-import { adminPage, ago, html, loginPage, overallOf, revealPage, statusPage } from "./ui";
+import { adminShell, ago, html, loginPage, overallOf, revealPage, settingsCard, statusPage } from "./ui";
 
 export default {
   async fetch(request, env) {
@@ -76,7 +76,14 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const blocked = await gateAdmin(request, env);
     if (blocked) return blocked;
     if (ctx.path === "/admin" && ctx.method === "GET") {
-      return admin(env, ctx.origin, url.searchParams.get("msg"));
+      return adminOverview(env, ctx.origin, url.searchParams.get("msg"));
+    }
+    const pluginPage = ctx.path.match(/^\/admin\/p\/([\w-]+)$/);
+    if (pluginPage && ctx.method === "GET") {
+      if (pluginPage[1] === "settings") {
+        return adminSettingsPage(env, ctx.origin, url.searchParams.get("msg"));
+      }
+      return adminPluginPage(pluginPage[1], env, ctx.origin, url.searchParams.get("msg"));
     }
     if (ctx.path === "/admin/settings" && ctx.method === "POST") {
       return saveSettings(request, env);
@@ -105,6 +112,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     const admined = await dispatch(PLUGINS, "admin", ctx);
     if (admined) return admined;
+    if (ctx.path.startsWith("/admin/")) return new Response("not found", { status: 404 });
     return new Response("not found", { status: 404 });
   }
 
@@ -131,23 +139,89 @@ async function status(env: Env, origin: string): Promise<Response> {
   return html(statusPage(env.APP_NAME, overall, kicker, sections, empty));
 }
 
-async function admin(env: Env, origin: string, msg: string | null): Promise<Response> {
-  const sectionCtx = { env, origin, title: env.APP_NAME };
-  const sections = await collect(PLUGINS, "adminSection", sectionCtx);
-  const summaries = await collect(PLUGINS, "summary", sectionCtx);
-  const settings = await loadSettings(env, [...ALERT_SETTING_KEYS, "last_alert_error"]);
-  const listed = await env.BUCKET.list({ prefix: "rollups/" });
-  const rollups = listed.objects
-    .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
-    .sort()
-    .reverse();
-  const footers = [
-    ...PLUGINS.map((p) => p.adminFooter).filter((s): s is string => Boolean(s)),
-    "Mute times are UTC.",
-  ];
-  return html(
-    adminPage(env.APP_NAME, sections, summaries, settings, rollups, footers, msg ?? undefined),
-  );
+async function adminOverview(env: Env, origin: string, msg: string | null): Promise<Response> {
+  return renderAdminPage(env, origin, "overview", msg);
+}
+
+async function adminPluginPage(pluginId: string, env: Env, origin: string, msg: string | null): Promise<Response> {
+  const match = PLUGINS.find((p) => p.id === pluginId);
+  if (!match || !match.adminNav) return new Response("not found", { status: 404 });
+  return renderAdminPage(env, origin, pluginId, msg);
+}
+
+async function adminSettingsPage(env: Env, origin: string, msg: string | null): Promise<Response> {
+  return renderAdminPage(env, origin, "settings", msg);
+}
+
+async function renderAdminPage(
+  env: Env,
+  origin: string,
+  activeId: string,
+  msg: string | null,
+): Promise<Response> {
+  const now = Date.now();
+  const cards = await collectNavCards(env, now);
+  let content: string;
+  if (activeId === "overview") {
+    content = overviewCards(cards);
+  } else if (activeId === "settings") {
+    const settings = await loadSettings(env, [...ALERT_SETTING_KEYS, "last_alert_error"]);
+    const listed = await env.BUCKET.list({ prefix: "rollups/" });
+    const rollups = listed.objects
+      .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
+      .sort()
+      .reverse();
+    content = settingsCard(settings, rollups);
+  } else {
+    const plugin = PLUGINS.find((p) => p.id === activeId);
+    if (!plugin || !plugin.adminSection) content = `<p class="sub">Not found.</p>`;
+    else content = await plugin.adminSection({ env, origin, title: env.APP_NAME });
+    if (plugin?.adminFooter) content += `<footer>${plugin.adminFooter}</footer>`;
+  }
+  if (activeId !== "overview" && activeId !== "settings") {
+    // shared settings are still reachable from the system page, not inside each plugin's own content
+  }
+  return html(adminShell({ title: env.APP_NAME, activeId, cards, content, flash: msg ?? undefined }));
+}
+
+function overviewCards(cards: Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }>): string {
+  if (cards.length === 0) return `<p class="sub">No modules yet.</p>`;
+  return `<div class="cards">` + cards.map((c) =>
+    `<a class="pcard" href="${c.href}">
+      <div class="dot ${c.dot}" style="width:8px;height:8px;border-radius:50%;background:var(--mute);display:inline-block;margin-right:6px;vertical-align:middle"></div>
+      <b style="display:inline">${c.label}</b>
+      ${c.summary ? `<div class="sub" style="margin:6px 0 0">${c.summary}</div>` : ""}
+    </a>`
+  ).join("") + `</div>`;
+}
+
+async function collectNavCards(env: Env, now: number): Promise<Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }>> {
+  const sectionCtx = { env, origin: "", title: env.APP_NAME };
+  const summaries = new Map<string, string>();
+  for (const p of PLUGINS) {
+    if (p.summary) {
+      try { summaries.set(p.id, await p.summary(sectionCtx) || ""); } catch { summaries.set(p.id, ""); }
+    }
+  }
+  const cards: Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }> = [];
+  for (const p of PLUGINS) {
+    if (!p.adminNav) continue;
+    // health dot: if the plugin exposes health, sample it
+    let dot = "unknown";
+    if (p.health) {
+      try {
+        const h = await p.health(env, now);
+        if ((h.down ?? 0) > 0) dot = "down";
+        else if ((h.up ?? 0) > 0) dot = "up";
+        else dot = "unknown";
+      } catch {}
+    }
+    const nav = p.adminNav;
+    cards.push({ id: p.id, label: nav.label, group: nav.group, summary: summaries.get(p.id) ?? "", dot, href: `/admin/p/${p.id}` });
+  }
+  const hasRevenue = cards.some((c) => c.id === "revenue");
+  cards.push({ id: "settings", label: "settings", group: "system", summary: hasRevenue ? "" : "", dot: "unknown", href: "/admin/p/settings" });
+  return cards;
 }
 
 const SETTING_FORM_KEYS = [

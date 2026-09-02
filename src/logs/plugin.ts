@@ -11,6 +11,7 @@ import { adminLogs } from "./ui";
 
 export const logs: Plugin = {
   id: "logs",
+  adminNav: { group: "monitoring", label: "logs" },
   adminFooter: "Logs are admin-only, 8KB max, 24h in R2. Tail and search live in the explorer plugin.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM log_sources").first<{ n: number }>();

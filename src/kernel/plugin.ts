@@ -7,6 +7,15 @@ export type RouteCtx = {
   origin: string;
 };
 
+export type AdminGroup = "monitoring" | "growth" | "distribute" | "system";
+
+export const ADMIN_GROUPS: Array<{ id: AdminGroup; label: string }> = [
+  { id: "monitoring", label: "monitoring" },
+  { id: "growth", label: "growth" },
+  { id: "distribute", label: "distribute" },
+  { id: "system", label: "system" },
+];
+
 export type SectionCtx = {
   env: Env;
   origin: string;
@@ -26,6 +35,8 @@ export type Plugin = {
   id: string;
   /** Plugins this one reads tables/helpers from. Catalog order must list deps first. */
   deps?: string[];
+  /** Where the plugin's admin page lives in the sidebar. Missing = not in the nav. */
+  adminNav?: { group: AdminGroup; label: string };
   route?(ctx: RouteCtx): Promise<Response | null> | Response | null;
   admin?(ctx: RouteCtx): Promise<Response | null> | Response | null;
   adminSection?(ctx: SectionCtx): Promise<string> | string;
