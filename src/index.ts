@@ -56,6 +56,19 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
   }
 
+  if (ctx.path === "/api/overview" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const cards = await collectNavCards(env, Date.now());
+    return Response.json({ cards });
+  }
+  if (ctx.path === "/api/monitors" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const monitors = await env.DB.prepare("SELECT * FROM monitors ORDER BY created_at").all();
+    return Response.json({ monitors: monitors.results ?? [] });
+  }
+
   if (ctx.path === "/health.json" && ctx.method === "GET") {
     return healthJson(env);
   }

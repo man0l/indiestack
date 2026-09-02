@@ -342,20 +342,22 @@ export function adminShell(opts: {
     <a class="sitem" href="/agents.md">/agents.md</a>
     <form method="post" action="/logout" style="margin-top:10px"><button class="sghost" type="submit">logout</button></form>
   </nav>`;
-  return page(
-    `admin · ${opts.title}`,
-    `<div class="admin">
-      ${sidebar}
-      <div class="amain">
-        <div class="ahead">
-          <form method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
-          ${opts.flash ? `<span class="flash">${esc(opts.flash)}</span>` : ""}
+    let pcap = `</style>`;
+    pcap += `<script type="module" src="/_app/admin.js"></script>`;
+    return page(
+      `admin · ${opts.title}`,
+      `<div id="app" class="admin">
+        ${sidebar}
+        <div class="amain">
+          <div class="ahead">
+            <form method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
+            ${opts.flash ? `<span class="flash">${esc(opts.flash)}</span>` : ""}
+          </div>
+          ${opts.content}
         </div>
-        ${opts.content}
-      </div>
-    </div>`,
-    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><script type="module" src="/_app/admin-CN-NnnvT.js"></script>`,
-  );
+      </div>`,
+      `<style>main{max-width:none;margin:0;padding:0;background:transparent}${pcap}</style>`,
+    );
 }
 
 export function settingsCard(settings: Record<string, string>, rollups: string[]): string {

@@ -8,6 +8,7 @@
   };
   let overview: any[] = $state([]);
   let activeId = $state('overview');
+  import Ping from './lib/plugins/Ping.svelte';
   async function load(route: string) {
     const id = route === '/admin' ? '' : route.replace('/admin/p/', '');
     activeId = id || 'overview';
@@ -24,6 +25,8 @@
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {#each overview as c}<Card label={c.label} summary={c.summary} dot={c.dot} href={c.href} icon={icons[c.label]} />{/each}
       </div>
+    {:else if activeId === 'ping'}
+      <Ping />
     {:else}
       <div id="amain">loading…</div>
     {/if}

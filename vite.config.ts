@@ -11,6 +11,11 @@ export default defineConfig({
     manifest: false,
     rollupOptions: {
       input: { admin: resolve(__dirname, 'admin/index.html') },
+      output: {
+        entryFileNames: '_app/admin.js',
+        chunkFileNames: '_app/[name].js',
+        assetFileNames: '_app/[name][extname]',
+      },
     },
   },
   resolve: { alias: { $lib: resolve(__dirname, 'admin/src/lib') } },
