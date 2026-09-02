@@ -35,7 +35,8 @@ export function adminDeploys(
   const connect = (
     id: string,
     label: string,
-    docs: string,
+    createUrl: string,
+    createLabel: string,
     state: { connected: boolean; who: string | null },
     note?: string,
   ) =>
@@ -45,12 +46,19 @@ export function adminDeploys(
            <button class="danger" type="submit">disconnect</button>
          </form>`
       : `<form class="card" method="post" action="/admin/deploys/${id}/connect">
-           <label>${esc(label)} personal token <a href="${esc(docs)}" target="_blank" rel="noopener">create one ↗</a>
-             <input type="password" name="token" placeholder="${id === "github" ? "ghp_… / github_pat_…" : "paste token"}" required/>
+           <label>${esc(label)} token — <a href="${esc(createUrl)}" target="_blank" rel="noopener">${esc(createLabel)} ↗</a>
+             <input type="password" name="token" placeholder="${id === "github" ? "github_pat_… (fine-grained)" : "paste token"}" required/>
            </label>
            <button type="submit">connect ${esc(label)}</button>
            ${note ? `<p class="sub" style="margin:10px 0 0">${note}</p>` : ""}
          </form>`;
+
+  const githubTokenUrl =
+    "https://github.com/settings/personal-access-tokens/new" +
+    "?name=IndieStack%20deploys" +
+    "&description=Read-only%20deployment%20status%20for%20IndieStack" +
+    "&permissions%5Bdeployments%5D=read";
+  const vercelTokenUrl = "https://vercel.com/account/tokens";
 
   const addGithub = github.connected
     ? `<form class="card" method="post" action="/admin/deploys/targets">
@@ -95,12 +103,20 @@ export function adminDeploys(
     ${connect(
       "github",
       "GitHub",
-      "https://github.com/settings/tokens",
+      githubTokenUrl,
+      "create a pre-filled read-only token",
       github,
-      "Recommended: without a token, checks run anonymously and share GitHub's rate budget with all of Cloudflare.",
+      "The link pre-selects <b>Deployments: read-only</b> — nothing else. Public repos work without any token (just slower); private repos need one.",
     )}
     ${addGithub}
-    ${connect("vercel", "Vercel", "https://vercel.com/account/settings/tokens", vercel)}
+    ${connect(
+      "vercel",
+      "Vercel",
+      vercelTokenUrl,
+      "create a token",
+      vercel,
+      "Vercel has no prefill: in the modal pick Scope → your account or team, any expiration. IndieStack only calls read endpoints.",
+    )}
     ${addVercel}`;
 }
 
