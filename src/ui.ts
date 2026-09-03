@@ -355,7 +355,7 @@ export function adminShell(opts: {
         <div ${opts.island ? `data-island="${esc(opts.island)}"` : ""}>${opts.content}</div>
       </div>
     </div>`,
-    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><script type="module" src="/_app/admin.js?v=3"></script>`,
+    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><link rel="stylesheet" href="/_app/admin.css?v=4"/><script type="module" src="/_app/admin.js?v=4"></script>`,
   );
 }
 

@@ -1,3 +1,12 @@
-@tailwind base;
+/* No @tailwind base (preflight disabled) — the Worker pages own their base CSS.
+   Utilities + components only, plus the minimal reset utilities assume. */
 @tailwind components;
 @tailwind utilities;
+
+*, ::before, ::after {
+  box-sizing: border-box;
+  border-width: 0;
+  border-style: solid;
+  border-color: #262b35;
+}
+svg { display: block; }

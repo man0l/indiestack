@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build && wrangler d1 migrations apply DB --local && wrangler dev --test-scheduled",
-    "deploy": "vite build && for f in dist/admin/_app/*; do npx wrangler r2 object put indiestack/assets/$(basename $f) --file=$f --remote >/dev/null 2>&1; done && wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "deploy": "vite build && node scripts/upload-assets.mjs && wrangler d1 migrations apply DB --remote && wrangler deploy",
     "types": "wrangler types",
     "check": "wrangler types && tsc --noEmit"
   },
