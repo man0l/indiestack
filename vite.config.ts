@@ -1,9 +1,10 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [svelte(), tailwindcss()],
   build: {
     outDir: 'dist/admin',
     assetsDir: '_app',
@@ -18,5 +19,12 @@ export default defineConfig({
       },
     },
   },
-  resolve: { alias: { $lib: resolve(__dirname, 'admin/src/lib') } },
+  resolve: {
+    alias: [
+      { find: '$lib/utils', replacement: resolve(__dirname, 'admin/src/lib/utils') },
+      { find: '$lib/components', replacement: resolve(__dirname, 'admin/src/lib/components') },
+      { find: '$lib', replacement: resolve(__dirname, 'admin/src/lib') },
+      { find: '$components', replacement: resolve(__dirname, 'admin/src/lib') },
+    ],
+  },
 });

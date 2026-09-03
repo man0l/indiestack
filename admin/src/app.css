@@ -1,12 +1,64 @@
-/* No @tailwind base (preflight disabled) — the Worker pages own their base CSS.
-   Utilities + components only, plus the minimal reset utilities assume. */
-@tailwind components;
-@tailwind utilities;
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 
+/* IndieStack admin palette — dark only. No preflight: the Worker pages own base CSS. */
+:root {
+  --background: #0e1014;
+  --foreground: #eef0f4;
+  --card: #171a21;
+  --card-foreground: #eef0f4;
+  --popover: #171a21;
+  --popover-foreground: #eef0f4;
+  --primary: #c8f542;
+  --primary-foreground: #10140a;
+  --secondary: #262b35;
+  --secondary-foreground: #eef0f4;
+  --muted: #171a21;
+  --muted-foreground: #8b919c;
+  --accent: #262b35;
+  --accent-foreground: #eef0f4;
+  --destructive: #ff5d57;
+  --destructive-foreground: #0e1014;
+  --border: #262b35;
+  --input: #262b35;
+  --ring: #c8f542;
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+/* minimal base utilities assume (preflight is not imported) */
 *, ::before, ::after {
   box-sizing: border-box;
   border-width: 0;
   border-style: solid;
-  border-color: #262b35;
+  border-color: var(--border);
 }
 svg { display: block; }
+body { background: var(--background); }
+
+@import "tw-animate-css";

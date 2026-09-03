@@ -7,3 +7,22 @@ dist/
 worker-configuration.d.ts
 .playwright-mcp/
 status-*.png
+
+# skills CLI: ignore every dot-directory it scaffolds, except .zcode (ZCode skills)
+.zed/
+# ignore all hidden agent dirs created by `skills add` (they are copies of the same skill)
+/*
+!.gitignore
+!PLAN.md
+!README.md
+!package.json
+!package-lock.json
+!tsconfig.json
+!wrangler.jsonc
+!migrations/
+!src/
+!admin/
+!mockups/
+!scripts/
+!.dev.vars.example
+!.zcode/
