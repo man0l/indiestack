@@ -1,9 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Activity, Plus, RefreshCw, Trash2, Pause, Play, Pencil, Zap } from 'lucide-svelte';
-  import Badge from '../ui/badge.svelte';
-  import Button from '../ui/button.svelte';
-  import Card from '../ui/card.svelte';
+  import ActivityIcon from '@lucide/svelte/icons/activity';
+  import PlusIcon from '@lucide/svelte/icons/plus';
+  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+  import Trash2Icon from '@lucide/svelte/icons/trash-2';
+  import PauseIcon from '@lucide/svelte/icons/pause';
+  import PlayIcon from '@lucide/svelte/icons/play';
+  import PencilIcon from '@lucide/svelte/icons/pencil';
+  import ZapIcon from '@lucide/svelte/icons/zap';
+  import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
+  import { Separator } from '$lib/components/ui/separator';
+  import * as Card from '$lib/components/ui/card';
+  import * as Field from '$lib/components/ui/field';
+  import { Root as NSRoot, Option as NSOption, OptGroup as NSGroup } from '$lib/components/ui/native-select';
+  import * as Alert from '$lib/components/ui/alert';
+  import * as Empty from '$lib/components/ui/empty';
+  import { Skeleton } from '$lib/components/ui/skeleton';
+  import FolderIcon from '@lucide/svelte/icons/folder';
 
   type Monitor = {
     id: string;
@@ -16,6 +30,18 @@
     last_status_code: number | null;
     last_latency_ms: number | null;
     last_error: string | null;
+  };
+
+  const statusDot = (m: Monitor) =>
+    !m.enabled ? 'bg-muted-foreground' : m.status === 'up' ? 'bg-success' : m.status === 'down' ? 'bg-destructive' : 'bg-muted-foreground';
+
+  const ago = (ts: number | null) => {
+    if (!ts) return 'never';
+    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return `${Math.floor(s / 86400)}d ago`;
   };
 
   let monitors: Monitor[] = $state([]);
@@ -37,137 +63,157 @@
   async function api(action: string, body?: FormData) {
     busy = action;
     err = '';
-    try {
-      const r = await fetch(action, { method: 'POST', body, headers: { accept: 'application/json' } });
-      const j = await r.json().catch(() => ({ ok: r.ok }));
-      if (!j.ok) err = j.error ?? 'failed';
-      else msg = j.msg ?? 'done';
-      await load();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = '';
-    }
+    const r = await fetch(action, { method: 'POST', body, headers: { accept: 'application/json' } });
+    const j = await r.json().catch(() => ({ ok: r.ok }));
+    if (!j.ok) err = j.error ?? 'failed';
+    else msg = j.msg ?? 'done';
+    await load();
+    busy = '';
   }
-
-  const ago = (ts: number | null) => {
-    if (!ts) return 'never';
-    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-    if (s < 60) return `${s}s ago`;
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-    return `${Math.floor(s / 86400)}d ago`;
-  };
 </script>
 
-{#if msg}<div class="mb-3 rounded-lg border border-[#2f3544] bg-[#12180f] px-3 py-2 text-sm text-[#c8f542]">{msg}</div>{/if}
-{#if err}<div class="mb-3 rounded-lg border border-[#ff5d57] bg-[#1a0e0e] px-3 py-2 text-sm text-[#ff5d57]">{err}</div>{/if}
+{#if msg}
+  <Alert.Root class="mb-3 border-chart-1/40 bg-chart-1/10">
+    <Alert.Description class="text-primary">{msg}</Alert.Description>
+  </Alert.Root>
+{/if}
+{#if err}
+  <Alert.Root class="mb-3" variant="destructive">
+    <Alert.Description>{err}</Alert.Description>
+  </Alert.Root>
+{/if}
 
-<Card>
-  <div class="mb-3 flex items-center justify-between">
-    <span class="text-xs uppercase tracking-widest text-[#8b919c]">monitors</span>
-    <div class="flex gap-2">
-      <Button variant="ghost" on:click={() => load()} disabled={busy !== ''}>
-        <span class="inline-flex items-center gap-1.5"><RefreshCw size={13} /> refresh</span>
-      </Button>
-      <Button on:click={() => (showAdd = !showAdd)} disabled={busy !== ''}>
-        <span class="inline-flex items-center gap-1.5"><Plus size={13} /> add monitor</span>
-      </Button>
+<Card.Root>
+  <Card.Header>
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <ActivityIcon />
+        <Card.Title>monitors</Card.Title>
+      </div>
+      <div class="flex gap-2">
+        <Button variant="ghost" size="sm" onclick={load} disabled={busy !== ''}>
+          <RefreshCwIcon data-icon="inline-start" /> refresh
+        </Button>
+        <Button size="sm" onclick={() => (showAdd = !showAdd)} disabled={busy !== ''}>
+          <PlusIcon data-icon="inline-start" /> add monitor
+        </Button>
+      </div>
     </div>
-  </div>
-
-  {#if loading}
-    <p class="text-sm text-[#8b919c]">loading…</p>
-  {:else if monitors.length === 0}
-    <p class="text-sm text-[#8b919c]">No monitors yet. Add HTTP, TCP, DNS, SSL or a host check below.</p>
-  {:else}
-    <div class="divide-y divide-[#262b35]">
-      {#each monitors as m (m.id)}
-        <div class="flex items-center gap-3 py-3">
-          <span class="h-2 w-2 shrink-0 rounded-full {m.enabled ? (m.status === 'up' ? 'bg-[#3ee08f]' : m.status === 'down' ? 'bg-[#ff5d57]' : 'bg-[#8b919c]') : 'bg-[#8b919c]'}"></span>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <span class="truncate text-sm font-medium">{m.name}</span>
-              {#if !m.enabled}<Badge variant="muted">paused</Badge>{/if}
+  </Card.Header>
+  <Card.Content>
+    {#if loading}
+      <div class="flex flex-col gap-2">
+        <Skeleton class="h-12 rounded-lg" />
+        <Skeleton class="h-12 rounded-lg" />
+      </div>
+    {:else if monitors.length === 0}
+      <Empty.Root>
+        <Empty.Header>
+          <Empty.Title>No monitors yet</Empty.Title>
+          <Empty.Description>Add HTTP, TCP, DNS, SSL or a host check below.</Empty.Description>
+        </Empty.Header>
+      </Empty.Root>
+    {:else}
+      <div class="flex flex-col gap-1">
+        {#each monitors as m (m.id)}
+          <div class="flex items-center gap-3 rounded-lg py-2.5">
+            <span class="size-2 shrink-0 rounded-full {statusDot(m)}"></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-sm font-medium">{m.name}</span>
+                <span class="text-xs text-muted-foreground">paused</span>
+              </div>
+              <div class="truncate text-xs text-muted-foreground">
+                {m.url} · every {m.interval_min}m
+                {#if m.last_error} · <span class="text-destructive">{m.last_error}</span>{/if}
+              </div>
             </div>
-            <div class="truncate text-xs text-[#8b919c]">
-              {m.url} · every {m.interval_min}m
-              {#if m.last_error} · <span class="text-[#ff5d57]">{m.last_error}</span>{/if}
+            {#if m.last_status_code != null}<span class="hidden shrink-0 text-xs text-muted-foreground tabular-nums sm:block">{m.last_status_code}</span>{/if}
+            {#if m.last_latency_ms != null}<span class="hidden shrink-0 text-xs text-muted-foreground tabular-nums sm:block">{m.last_latency_ms}ms</span>{/if}
+            <span class="hidden shrink-0 text-xs text-muted-foreground tabular-nums sm:block">{ago(m.last_check_at)}</span>
+            <span class="rounded-full px-2 py-0.5 text-xs font-medium {m.enabled ? (m.status === 'up' ? 'bg-chart-2/20 text-success' : 'bg-destructive/20 text-destructive') : 'bg-muted text-muted-foreground'}">{m.enabled ? m.status : 'paused'}</span>
+            <div class="flex shrink-0 gap-1">
+              <Button variant="ghost" size="icon" title="edit" href={`/admin/monitors/${m.id}`}>
+                <PencilIcon />
+              </Button>
+              <Button variant="ghost" size="icon" title={m.enabled ? 'pause' : 'resume'} disabled={busy !== ''} onclick={() => api(`/admin/monitors/${m.id}/toggle`)}>
+                {#if m.enabled}<PauseIcon />{:else}<PlayIcon />{/if}
+              </Button>
+              <Button variant="ghost" size="icon" title="remove" disabled={busy !== ''} onclick={() => api(`/admin/monitors/${m.id}/delete`)}>
+                <Trash2Icon />
+              </Button>
             </div>
           </div>
-          {#if m.last_status_code != null}<span class="hidden shrink-0 text-xs tabular-nums text-[#8b919c] sm:block">{m.last_status_code}</span>{/if}
-          {#if m.last_latency_ms != null}<span class="hidden shrink-0 text-xs tabular-nums text-[#8b919c] sm:block">{m.last_latency_ms}ms</span>{/if}
-          <span class="hidden shrink-0 text-xs tabular-nums text-[#8b919c] sm:block">{ago(m.last_check_at)}</span>
-          <Badge variant={m.enabled ? (m.status === 'down' ? 'destructive' : m.status === 'up' ? 'default' : 'muted') : 'muted'}>{m.enabled ? m.status : 'paused'}</Badge>
-          <div class="flex shrink-0 gap-1">
-            <a class="rounded-md p-1.5 text-[#8b919c] hover:bg-[#262b35] hover:text-white" title="edit" href={`/admin/monitors/${m.id}`}>
-              <Pencil size={13} />
-            </a>
-            <button class="rounded-md p-1.5 text-[#8b919c] hover:bg-[#262b35] hover:text-white disabled:opacity-40"
-              title={m.enabled ? 'pause' : 'resume'} disabled={busy !== ''}
-              on:click={() => api(`/admin/monitors/${m.id}/toggle`)}>
-              {#if m.enabled}<Pause size={13} />{:else}<Play size={13} />{/if}
-            </button>
-            <button class="rounded-md p-1.5 text-[#8b919c] hover:bg-[#262b35] hover:text-[#ff5d57] disabled:opacity-40"
-              title="remove" disabled={busy !== ''}
-              on:click={() => api(`/admin/monitors/${m.id}/delete`)}>
-              <Trash2 size={13} />
-            </button>
-          </div>
-        </div>
-      {/each}
-    </div>
-  {/if}
-</Card>
+          <Separator />
+        {/each}
+      </div>
+    {/if}
+  </Card.Content>
+</Card.Root>
 
 {#if showAdd}
-  <Card>
-    <form
-      method="post"
-      action="/admin/monitors"
-      on:submit={() => setTimeout(load, 600)}
-      class="space-y-3"
-    >
-      <div class="grid gap-3 sm:grid-cols-2">
-        <label class="text-xs text-[#8b919c]">type
-          <select name="kind" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm">
-            <option value="http">HTTP(S)</option>
-            <option value="tcp">TCP port</option>
-            <option value="udp">UDP port (TCP probe)</option>
-            <option value="icmp">Host (TCP fallback)</option>
-            <option value="dns">DNS (DoH)</option>
-            <option value="ssl">SSL expiry</option>
-            <option value="domain">Domain expiry</option>
-          </select>
-        </label>
-        <label class="text-xs text-[#8b919c]">target
-          <input name="url" placeholder="https://example.com  or  example.com:22" required class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">name (optional)
-          <input name="name" maxlength="40" placeholder="api" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">interval minutes
-          <input type="number" name="interval_min" min="1" max="60" value="5" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">expected status (0 = any 2xx)
-          <input type="number" name="expect_status" min="0" max="599" value="0" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">slow if slower than ms (0 = off)
-          <input type="number" name="max_latency_ms" min="0" max="15000" value="0" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">keyword (optional)
-          <input name="keyword" maxlength="80" placeholder="ok" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        </label>
-        <label class="text-xs text-[#8b919c]">keyword mode
-          <select name="keyword_mode" class="mt-1 w-full rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm">
-            <option value="exists">must contain</option>
-            <option value="absent">must not contain</option>
-          </select>
-        </label>
-      </div>
-      <Button type="submit" disabled={busy !== ''}>
-        <span class="inline-flex items-center gap-1.5"><Zap size={13} /> add monitor</span>
-      </Button>
-    </form>
-  </Card>
+  <Card.Root class="mt-3">
+    <Card.Header>
+      <Card.Title>new monitor</Card.Title>
+      <Card.Description>First check runs immediately on add.</Card.Description>
+    </Card.Header>
+    <Card.Content>
+      <form method="post" action="/admin/monitors" onsubmit={() => setTimeout(load, 600)}>
+        <Field.FieldGroup>
+          <Field.Field>
+            <Field.FieldLabel for="kind">type</Field.FieldLabel>
+            <NSRoot id="kind" name="kind">
+                <NSGroup>
+                  <NSOption value="http">HTTP(S)</NSOption>
+                  <NSOption value="tcp">TCP port</NSOption>
+                  <NSOption value="udp">UDP port (TCP probe)</NSOption>
+                  <NSOption value="icmp">Host (TCP fallback)</NSOption>
+                  <NSOption value="dns">DNS (DoH)</NSOption>
+                  <NSOption value="ssl">SSL expiry</NSOption>
+                  <NSOption value="domain">Domain expiry</NSOption>
+                </NSGroup>
+            </NSRoot>
+          </Field.Field>
+          <Field.Field>
+            <Field.FieldLabel for="url">target</Field.FieldLabel>
+            <Input id="url" name="url" placeholder="https://example.com  or  example.com:22" required />
+          </Field.Field>
+          <Field.Field>
+            <Field.FieldLabel for="mname">name (optional)</Field.FieldLabel>
+            <Input id="mname" name="name" maxlength={40} placeholder="api" />
+          </Field.Field>
+          <div class="flex gap-2">
+            <Field.Field class="flex-1">
+              <Field.FieldLabel for="interval">interval minutes</Field.FieldLabel>
+              <Input id="interval" name="interval_min" type="number" min="1" max="60" value="5" />
+            </Field.Field>
+            <Field.Field class="flex-1">
+              <Field.FieldLabel for="expect">expected status (0 = any 2xx)</Field.FieldLabel>
+              <Input id="expect" name="expect_status" type="number" min="0" max="599" value="0" />
+            </Field.Field>
+          </div>
+          <Field.Field>
+            <Field.FieldLabel for="latency">slow if slower than ms (0 = off)</Field.FieldLabel>
+            <Input id="latency" name="max_latency_ms" type="number" min="0" max="15000" value="0" />
+          </Field.Field>
+          <Field.Field>
+            <Field.FieldLabel for="keyword">keyword (optional)</Field.FieldLabel>
+            <Input id="keyword" name="keyword" maxlength={80} placeholder="ok" />
+          </Field.Field>
+          <Field.Field>
+            <Field.FieldLabel for="kmode">keyword mode</Field.FieldLabel>
+            <NSRoot id="kmode" name="keyword_mode">
+                <NSGroup>
+                  <NSOption value="exists">must contain</NSOption>
+                  <NSOption value="absent">must not contain</NSOption>
+                </NSGroup>
+            </NSRoot>
+          </Field.Field>
+        </Field.FieldGroup>
+        <Button type="submit" class="mt-4" disabled={busy !== ''}>
+          <ZapIcon data-icon="inline-start" /> add monitor
+        </Button>
+      </form>
+    </Card.Content>
+  </Card.Root>
 {/if}

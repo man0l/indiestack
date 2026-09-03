@@ -66,14 +66,17 @@ function bindCheckForm(root: ParentNode) {
   });
 }
 
+function isSpaPath(href: string): boolean {
+  return /^\/admin(\/p\/[\w-]+)?$/.test(href);
+}
+
 function onClick(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href^="/admin"]');
-  if (!a || a.dataset.spaBound) return;
+  if (!a) return;
   const href = a.getAttribute('href')!;
   // plugin sub-pages (edit monitor etc.) stay full loads for now
-  if (!/^\/admin(\/p\/[\w-]+)?$/.test(href)) return;
+  if (!isSpaPath(href)) return;
   e.preventDefault();
-  a.dataset.spaBound = '1';
   navigate(href);
 }
 

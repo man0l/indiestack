@@ -1,9 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { GitBranch, Rocket, RefreshCw, Plus, Trash2, Pause, Play, Zap, Link2, Link2Off, Check } from 'lucide-svelte';
-  import Badge from '../ui/badge.svelte';
-  import Button from '../ui/button.svelte';
-  import Card from '../ui/card.svelte';
+  import GitBranchIcon from '@lucide/svelte/icons/git-branch';
+  import RocketIcon from '@lucide/svelte/icons/rocket';
+  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+  import PlusIcon from '@lucide/svelte/icons/plus';
+  import Trash2Icon from '@lucide/svelte/icons/trash-2';
+  import PauseIcon from '@lucide/svelte/icons/pause';
+  import PlayIcon from '@lucide/svelte/icons/play';
+  import ZapIcon from '@lucide/svelte/icons/zap';
+  import Link2Icon from '@lucide/svelte/icons/link-2';
+  import Link2OffIcon from '@lucide/svelte/icons/link-2-off';
+  import CheckIcon from '@lucide/svelte/icons/check';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Button } from '$lib/components/ui/button';
+import { Input } from '$lib/components/ui/input';
+  import * as Card from '$lib/components/ui/card';
 
   type Target = {
     id: string;
@@ -126,21 +137,22 @@
 {#if msg}<div class="mb-3 rounded-lg border border-[#2f3544] bg-[#12180f] px-3 py-2 text-sm text-[#c8f542]">{msg}</div>{/if}
 {#if err}<div class="mb-3 rounded-lg border border-[#ff5d57] bg-[#1a0e0e] px-3 py-2 text-sm text-[#ff5d57]">{err}</div>{/if}
 
-<Card>
+<Card.Root>
+  <Card.Content>
   <div class="mb-3 flex items-center justify-between">
     <span class="text-xs uppercase tracking-widest text-[#8b919c]">watching</span>
     <div class="flex gap-2">
-      <Button variant="ghost" on:click={() => load()} disabled={busy !== ''}>
-        <span class="inline-flex items-center gap-1.5"><RefreshCw size={13} /> refresh</span>
+      <Button variant="ghost" onclick={() => load()} disabled={busy !== ''}>
+        <span class="inline-flex items-center gap-1.5"><RefreshCwIcon data-icon="inline-start" /> refresh</span>
       </Button>
       {#if github.connected}
-        <Button on:click={() => (showAdd = showAdd === 'github' ? null : 'github')} disabled={busy !== ''}>
-          <span class="inline-flex items-center gap-1.5"><Plus size={13} /> add repos</span>
+        <Button onclick={() => (showAdd = showAdd === 'github' ? null : 'github')} disabled={busy !== ''}>
+          <span class="inline-flex items-center gap-1.5"><PlusIcon data-icon="inline-start" /> add repos</span>
         </Button>
       {/if}
       {#if vercel.connected}
-        <Button on:click={() => (showAdd = showAdd === 'vercel' ? null : 'vercel')} disabled={busy !== ''}>
-          <span class="inline-flex items-center gap-1.5"><Plus size={13} /> vercel</span>
+        <Button onclick={() => (showAdd = showAdd === 'vercel' ? null : 'vercel')} disabled={busy !== ''}>
+          <span class="inline-flex items-center gap-1.5"><PlusIcon data-icon="inline-start" /> vercel</span>
         </Button>
       {/if}
     </div>
@@ -156,11 +168,11 @@
     <div class="divide-y divide-[#262b35]">
       {#each targets as t (t.id)}
         <div class="flex items-center gap-3 py-3">
-          {#if t.provider === 'github'}<GitBranch size={15} class="shrink-0 text-[#8b919c]" />{:else}<Rocket size={15} class="shrink-0 text-[#8b919c]" />{/if}
+          {#if t.provider === 'github'}<GitBranchIcon class="shrink-0 text-muted-foreground" />{:else}<RocketIcon class="shrink-0 text-muted-foreground" />{/if}
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
               <span class="truncate text-sm font-medium">{t.name}</span>
-              {#if !t.enabled}<Badge variant="muted">paused</Badge>{/if}
+              {#if !t.enabled}<Badge variant="secondary">paused</Badge>{/if}
             </div>
             <div class="truncate text-xs text-[#8b919c]">
               {t.repo ?? `${t.project}${t.team ? ` @ ${t.team}` : ''}`} · every {t.interval_min}m
@@ -169,33 +181,35 @@
             </div>
           </div>
           <span class="hidden shrink-0 text-xs tabular-nums text-[#8b919c] sm:block">{ago(t.last_check_at)}</span>
-          <Badge variant={t.enabled ? (t.status === 'down' ? 'destructive' : t.status === 'up' ? 'default' : 'muted') : 'muted'}>{t.status}</Badge>
+          <Badge variant={t.enabled ? (t.status === 'down' ? 'destructive' : t.status === 'up' ? 'default' : 'outline') : 'outline'}>{t.status}</Badge>
           <div class="flex shrink-0 gap-1">
             <button class="rounded-md p-1.5 text-[#8b919c] hover:bg-[#262b35] hover:text-white disabled:opacity-40"
-              title="check now" disabled={busy !== ''} on:click={() => api(`/admin/deploys/targets/${t.id}/check`)}>
-              <Zap size={13} />
+              title="check now" disabled={busy !== ''} onclick={() => api(`/admin/deploys/targets/${t.id}/check`)}>
+              <ZapIcon />
             </button>
             <button class="rounded-md p-1.5 text-[#8b919c] hover:bg-[#262b35] hover:text-white"
-              title={t.enabled ? 'pause' : 'resume'} on:click={() => api(`/admin/deploys/targets/${t.id}/toggle`)}>
-              {#if t.enabled}<Pause size={13} />{:else}<Play size={13} />{/if}
+              title={t.enabled ? 'pause' : 'resume'} onclick={() => api(`/admin/deploys/targets/${t.id}/toggle`)}>
+              {#if t.enabled}<PauseIcon />{:else}<PlayIcon />{/if}
             </button>
             <button class="rounded-md p-1.5 text-[#8b919c] hover:bg-[#262b35] hover:text-[#ff5d57]"
-              title="remove" on:click={() => api(`/admin/deploys/targets/${t.id}/delete`)}>
-              <Trash2 size={13} />
+              title="remove" onclick={() => api(`/admin/deploys/targets/${t.id}/delete`)}>
+              <Trash2Icon />
             </button>
           </div>
         </div>
       {/each}
     </div>
   {/if}
-</Card>
+  </Card.Content>
+</Card.Root>
 
 {#if showAdd === 'github' && github.connected}
-  <Card>
+  <Card.Root>
+  <Card.Content>
     <div class="mb-3 flex items-center justify-between">
-      <div class="flex items-center gap-2 text-sm font-semibold text-white"><GitBranch size={15} /> pick repos to watch</div>
-      <Button variant="ghost" on:click={loadRepos} disabled={reposLoading}>
-        <span class="inline-flex items-center gap-1.5"><RefreshCw size={13} /> reload list</span>
+      <div class="flex items-center gap-2 text-sm font-semibold text-white"><GitBranchIcon size={15} /> pick repos to watch</div>
+      <Button variant="ghost" onclick={loadRepos} disabled={reposLoading}>
+        <span class="inline-flex items-center gap-1.5"><RefreshCwIcon data-icon="inline-start" /> reload list</span>
       </Button>
     </div>
 
@@ -213,12 +227,12 @@
       <div class="max-h-64 divide-y divide-[#262b35] overflow-y-auto rounded-lg border border-[#262b35]">
         {#each visibleRepos() as r (r.full_name)}
           <button type="button" class="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-[#171a21]"
-            on:click={() => toggleSelect(r.full_name)}>
+            onclick={() => toggleSelect(r.full_name)}>
             <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded border {selected.includes(r.full_name) ? 'border-[#c8f542] bg-[#c8f542] text-black' : 'border-[#262b35]'}">
-              {#if selected.includes(r.full_name)}<Check size={12} strokeWidth={3} />{/if}
+              {#if selected.includes(r.full_name)}<CheckIcon />{/if}
             </span>
             <span class="flex-1 truncate">{r.full_name}</span>
-            {#if r.private}<Badge variant="muted">private</Badge>{/if}
+            {#if r.private}<Badge variant="secondary">private</Badge>{/if}
             <span class="text-xs tabular-nums text-[#8b919c]">{pushedAgo(r.pushed_at)}</span>
           </button>
         {/each}
@@ -231,7 +245,7 @@
       </label>
       <Button
         disabled={busy !== '' || (selected.length === 0 && !manualRepo)}
-        on:click={() => {
+        onclick={() => {
           const list = manualRepo ? [...new Set([...selected, manualRepo])] : selected;
           api('/admin/deploys/targets/bulk', { repos: list, interval_min: interval }).then(() => {
             selected = [];
@@ -244,13 +258,15 @@
       </Button>
       <span class="text-xs text-[#8b919c]">{repos.length} repos found · picks probe immediately</span>
     </div>
-  </Card>
+  </Card.Content>
+</Card.Root>
 {/if}
 
 {#if showAdd === 'vercel' && vercel.connected}
-  <Card>
-    <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Rocket size={15} /> watch a Vercel project</div>
-    <form class="space-y-3" on:submit|preventDefault={(e) => {
+  <Card.Root>
+  <Card.Content>
+    <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><RocketIcon size={15} /> watch a Vercel project</div>
+    <form class="space-y-3" onsubmit={(e) => { e.preventDefault();
       const fd = new FormData(e.currentTarget as HTMLFormElement);
       fd.set('provider', 'vercel');
       api('/admin/deploys/targets', fd).then(() => (showAdd = null));
@@ -265,52 +281,57 @@
       </div>
       <Button type="submit" disabled={busy !== ''}>watch deploys</Button>
     </form>
-  </Card>
+  </Card.Content>
+</Card.Root>
 {/if}
 
-<div class="mt-4 grid gap-3 sm:grid-cols-2">
-  <div class="rounded-xl border border-[#262b35] bg-[#171a21] p-4">
-    <div class="mb-2 flex items-center gap-2 text-sm font-semibold text-white"><GitBranch size={14} /> GitHub</div>
+<Card.Root class="mt-4">
+  <Card.Content>
+    <div class="grid gap-3 sm:grid-cols-2">
+  <div class="rounded-xl border border-border bg-card p-4">
+    <div class="mb-2 flex items-center gap-2 text-sm font-semibold"><GitBranchIcon /> GitHub</div>
     {#if github.connected}
-      <p class="mb-3 text-xs text-[#8b919c]">connected{github.who ? ` as ${github.who}` : ''}</p>
-      <Button variant="ghost" on:click={() => api('/admin/deploys/github/disconnect')} disabled={busy !== ''}>
-        <span class="inline-flex items-center gap-1.5"><Link2Off size={13} /> disconnect</span>
+      <p class="mb-3 text-xs text-muted-foreground">connected{github.who ? ` as ${github.who}` : ''}</p>
+      <Button variant="ghost" onclick={() => api('/admin/deploys/github/disconnect')} disabled={busy !== ''}>
+        <span class="inline-flex items-center gap-1.5"><Link2OffIcon data-icon="inline-start" /> disconnect</span>
       </Button>
     {:else}
-      <p class="mb-3 text-xs text-[#8b919c]">
-        <a class="text-[#c8f542] underline" target="_blank" rel="noopener"
+      <p class="mb-3 text-xs text-muted-foreground">
+        <a class="text-primary underline" target="_blank" rel="noopener"
           href="https://github.com/settings/personal-access-tokens/new?name=IndieStack%20deploys&description=Read-only%20deployment%20status%20for%20IndieStack&permissions%5Bdeployments%5D=read&expiration=none">create a pre-filled read-only token ↗</a>
         — Deployments: read-only, no expiration. Public repos work without a token (rate-shared).
       </p>
-      <form class="flex gap-2" on:submit|preventDefault={(e) => {
+      <form class="flex gap-2" onsubmit={(e) => { e.preventDefault();
         const fd = new FormData(e.currentTarget as HTMLFormElement);
         api('/admin/deploys/github/connect', fd);
       }}>
-        <input name="token" type="password" placeholder="github_pat_…" required class="flex-1 rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        <Button type="submit" disabled={busy !== ''}><span class="inline-flex items-center gap-1.5"><Link2 size={13} /> connect</span></Button>
+        <input name="token" type="password" placeholder="github_pat_…" required class="flex-1" />
+        <Button type="submit" disabled={busy !== ''}><span class="inline-flex items-center gap-1.5"><Link2Icon data-icon="inline-start" /> connect</span></Button>
       </form>
     {/if}
   </div>
 
-  <div class="rounded-xl border border-[#262b35] bg-[#171a21] p-4">
-    <div class="mb-2 flex items-center gap-2 text-sm font-semibold text-white"><Rocket size={14} /> Vercel</div>
+  <div class="rounded-xl border border-border bg-card p-4">
+    <div class="mb-2 flex items-center gap-2 text-sm font-semibold"><RocketIcon /> Vercel</div>
     {#if vercel.connected}
-      <p class="mb-3 text-xs text-[#8b919c]">connected{vercel.who ? ` as ${vercel.who}` : ''}</p>
-      <Button variant="ghost" on:click={() => api('/admin/deploys/vercel/disconnect')} disabled={busy !== ''}>
-        <span class="inline-flex items-center gap-1.5"><Link2Off size={13} /> disconnect</span>
+      <p class="mb-3 text-xs text-muted-foreground">connected{vercel.who ? ` as ${vercel.who}` : ''}</p>
+      <Button variant="ghost" onclick={() => api('/admin/deploys/vercel/disconnect')} disabled={busy !== ''}>
+        <span class="inline-flex items-center gap-1.5"><Link2OffIcon data-icon="inline-start" /> disconnect</span>
       </Button>
     {:else}
-      <p class="mb-3 text-xs text-[#8b919c]">
-        <a class="text-[#c8f542] underline" target="_blank" rel="noopener" href="https://vercel.com/account/tokens">create a token ↗</a>
+      <p class="mb-3 text-xs text-muted-foreground">
+        <a class="text-primary underline" target="_blank" rel="noopener" href="https://vercel.com/account/tokens">create a token ↗</a>
         — no prefill on Vercel: scope to your account or team. IndieStack only calls read endpoints.
       </p>
-      <form class="flex gap-2" on:submit|preventDefault={(e) => {
+      <form class="flex gap-2" onsubmit={(e) => { e.preventDefault();
         const fd = new FormData(e.currentTarget as HTMLFormElement);
         api('/admin/deploys/vercel/connect', fd);
       }}>
-        <input name="token" type="password" placeholder="paste token" required class="flex-1 rounded-lg border border-[#262b35] bg-[#0e1014] p-2 text-sm" />
-        <Button type="submit" disabled={busy !== ''}><span class="inline-flex items-center gap-1.5"><Link2 size={13} /> connect</span></Button>
+        <input name="token" type="password" placeholder="paste token" required class="flex-1" />
+        <Button type="submit" disabled={busy !== ''}><span class="inline-flex items-center gap-1.5"><Link2Icon data-icon="inline-start" /> connect</span></Button>
       </form>
     {/if}
   </div>
 </div>
+  </Card.Content>
+</Card.Root>

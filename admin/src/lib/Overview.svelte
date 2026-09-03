@@ -1,10 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Activity, HeartPulse, GitBranch, FileText, BarChart3, LayoutGrid, BadgeDollarSign, Radio, Bot, Target, Share2, Sparkles, HardDrive, LayoutTemplate, Settings } from 'lucide-svelte';
+  import ActivityIcon from '@lucide/svelte/icons/activity';
+  import HeartPulseIcon from '@lucide/svelte/icons/heart-pulse';
+  import GitBranchIcon from '@lucide/svelte/icons/git-branch';
+  import FileTextIcon from '@lucide/svelte/icons/file-text';
+  import ChartColumnIcon from '@lucide/svelte/icons/chart-column';
+  import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
+  import BadgeDollarSignIcon from '@lucide/svelte/icons/badge-dollar-sign';
+  import RadioIcon from '@lucide/svelte/icons/radio';
+  import BotIcon from '@lucide/svelte/icons/bot';
+  import TargetIcon from '@lucide/svelte/icons/target';
+  import Share2Icon from '@lucide/svelte/icons/share-2';
+  import SparklesIcon from '@lucide/svelte/icons/sparkles';
+  import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
+  import LayoutTemplateIcon from '@lucide/svelte/icons/layout-template';
+  import SettingsIcon from '@lucide/svelte/icons/settings';
   import * as Card from '$lib/components/ui/card';
+  import { Skeleton } from '$lib/components/ui/skeleton';
+  import * as Empty from '$lib/components/ui/empty';
+  import FolderIcon from '@lucide/svelte/icons/folder';
 
-  const icons: Record<string, any> = {
-    monitors: Activity, heartbeats: HeartPulse, deploys: GitBranch, logs: FileText, analytics: BarChart3, widgets: LayoutGrid, revenue: BadgeDollarSign, signals: Radio, 'ai crawlers': Bot, goals: Target, share: Share2, 'ai agents': Sparkles, backup: HardDrive, templates: LayoutTemplate, settings: Settings,
+    const icons: Record<string, any> = {
+    monitors: ActivityIcon, heartbeats: HeartPulseIcon, deploys: GitBranchIcon, logs: FileTextIcon, analytics: ChartColumnIcon, widgets: LayoutGridIcon, revenue: BadgeDollarSignIcon, signals: RadioIcon, 'ai crawlers': BotIcon, goals: TargetIcon, share: Share2Icon, 'ai agents': SparklesIcon, backup: HardDriveIcon, templates: LayoutTemplateIcon, settings: SettingsIcon,
   };
 
   let cards: any[] = $state([]);
@@ -21,7 +38,19 @@
 </script>
 
 {#if loading}
-  <p class="text-sm text-muted-foreground">loading…</p>
+  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    {#each Array(8) as _, i (i)}
+      <Skeleton class="h-24 rounded-xl" />
+    {/each}
+  </div>
+{:else if cards.length === 0}
+  <Empty.Root>
+    <Empty.Header>
+      <Empty.Media variant="icon"><FolderIcon /></Empty.Media>
+      <Empty.Title>No modules yet</Empty.Title>
+      <Empty.Description>Plugins register here when they declare adminNav.</Empty.Description>
+    </Empty.Header>
+  </Empty.Root>
 {:else}
   <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
     {#each cards as c (c.id)}
@@ -30,11 +59,11 @@
         <Card.Root>
           <Card.Content class="p-3.5">
             <div class="flex items-center gap-1.5">
-              {#if Icon}<Icon size={14} strokeWidth={1.5} class="text-muted-foreground" />{/if}
-              <span class="h-2 w-2 rounded-full {c.dot === 'up' ? 'bg-[#3ee08f]' : c.dot === 'down' ? 'bg-[#ff5d57]' : 'bg-muted-foreground'}"></span>
+              {#if Icon}<Icon class="text-muted-foreground" />{/if}
+              <span class="size-2 rounded-full {c.dot === 'up' ? 'bg-success' : c.dot === 'down' ? 'bg-destructive' : 'bg-muted-foreground'}"></span>
               <span class="text-sm font-semibold">{c.label}</span>
             </div>
-            {#if c.summary}<div class="mt-1.5 text-xs text-muted-foreground">{c.summary}</div>{/if}
+            {#if c.summary}<div class="mt-1.5 truncate text-xs text-muted-foreground">{c.summary}</div>{/if}
           </Card.Content>
         </Card.Root>
       </a>

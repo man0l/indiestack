@@ -24,6 +24,26 @@
   --input: #262b35;
   --ring: #c8f542;
   --radius: 0.75rem;
+  /* Rhea: status tokens beyond primary/destructive */
+  --success: #3ee08f;
+  --success-foreground: #06281a;
+  --warning: #e6c15c;
+  --warning-foreground: #2a2003;
+  /* Rhea: sidebar tokens */
+  --sidebar: #0c0d10;
+  --sidebar-foreground: #a8adb7;
+  --sidebar-accent: #171a21;
+  --sidebar-accent-foreground: #eef0f4;
+  --sidebar-border: #262b35;
+  /* Rhea: chart tokens (analytics bars) */
+  --chart-1: #c8f542;
+  --chart-2: #3ee08f;
+  --chart-3: #e6c15c;
+  --chart-4: #ff5d57;
+  --chart-5: #8b919c;
+  /* Rhea: secondary raised surface */
+  --surface: #1c1f26;
+  --surface-foreground: #eef0f4;
 }
 
 @theme inline {
@@ -46,6 +66,22 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-foreground);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);

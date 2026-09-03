@@ -26,3 +26,4 @@ status-*.png
 !scripts/
 !.dev.vars.example
 !.zcode/
+!components.json
