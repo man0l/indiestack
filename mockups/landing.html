@@ -3,7 +3,12 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>IndieStack — skip the monitoring paywall. $120 once.</title>
+  <title>IndieStack — self-host the ops stack. Own the data. $120 once.</title>
+  <meta property="og:title" content="IndieStack — self-host the ops stack. Own the data. $120 once."/>
+  <meta property="og:description" content="Uptime, cron heartbeats, deploy checks, logs, site analytics and a status page — one Worker on your own Cloudflare account. Your D1, your R2, your data. $120 once, updates forever."/>
+  <meta property="og:type" content="website"/>
+  <meta name="twitter:card" content="summary"/>
+  <meta name="twitter:creator" content="@manol_ai"/>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23c8f542'/%3E%3C/svg%3E"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -14,7 +19,7 @@
        Title    Syne              — h2, brand, kill cards
        Body     IBM Plex Sans
        Mono     IBM Plex Mono     — ticker, code, labels
-       Number   Unbounded         — $408 / $120 / $528
+       Number   Unbounded         — $432 / $120
        Floor    perspective lime grid + grain + spotlight */
     :root {
       --bg: #030303;
@@ -132,7 +137,7 @@
     }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--up); box-shadow: 0 0 12px var(--up); }
     h1 {
-      margin: 28px 0 18px;
+      margin: 28px auto 18px;
       font-family: var(--serif); font-weight: 400;
       font-size: clamp(48px, 8.2vw, 96px);
       line-height: 0.92; letter-spacing: -0.035em;
@@ -253,7 +258,7 @@
     .limits td { padding: 10px 0; border-top: 1px solid var(--line); vertical-align: top; }
     .limits td:first-child { color: var(--mute); width: 40%; font-family: var(--mono); font-size: 12px; }
 
-    .kills { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .kills { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .kill {
       background: var(--elev); border: 1px solid var(--line); border-radius: 16px;
       padding: 20px 18px; min-height: 200px; display: flex; flex-direction: column;
@@ -331,6 +336,21 @@
       border: 1px solid var(--line);
     }
     footer.cta h2 { font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 64px); letter-spacing: -0.03em; }
+    .founder {
+      margin: 0 0 20px; padding: 26px 28px; border-radius: 22px;
+      border: 1px solid var(--line); background: var(--elev);
+      display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+    }
+    .founder .ava {
+      width: 52px; height: 52px; border-radius: 50%; flex: 0 0 auto;
+      display: grid; place-items: center;
+      background: linear-gradient(135deg, #c8f54233, #0a0a0b);
+      border: 1px solid #c8f54255;
+      font-family: var(--display); font-weight: 700; font-size: 18px; color: var(--accent);
+    }
+    .founder .who { flex: 1 1 320px; min-width: 0; }
+    .founder .who b { font-family: var(--display); letter-spacing: -0.03em; font-size: 18px; display: block; }
+    .founder .who span { color: var(--mute); font-size: 14px; }
     footer.legal { color: var(--mute); font-size: 12px; padding: 8px 0 56px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-family: var(--mono); }
     code { font-family: var(--mono); font-size: 0.88em; background: #ffffff0a; padding: 1px 5px; border-radius: 4px; }
 
@@ -361,43 +381,43 @@
     <div class="bar">
       <a class="brand" href="#"><span class="mark"></span> IndieStack</a>
       <div class="nav-links">
-        <a href="#what">Product</a>
-        <a href="#replace">Replaces</a>
-        <a href="#limits">Limits</a>
-        <a href="#price">Pricing</a>
+        <a href="#stack">The stack</a>
+        <a href="#own">Own it</a>
+        <a href="#ai">Onboard your AI</a>
+        <a href="#price">Price</a>
       </div>
-      <a class="btn primary" href="#price">Skip the paywall · $120</a>
+      <a class="btn primary" href="#price">Own the stack · $120</a>
     </div>
   </nav>
 
   <div class="ticker" aria-hidden="true">
     <div class="ticker-track">
-      <span>UptimeRobot free · <b>personal use only</b></span>
-      <span>Webhooks <b>behind Pro</b></span>
-      <span>Status pages <b>$29–39/mo</b></span>
-      <span>Better Stack paid <b>−$34/mo</b> · overkill for “is it up”</span>
-      <span>Cronitor <b>−$10/mo</b> if you buy it</span>
-      <span>If you buy both <b>$528/yr</b></span>
-      <span>UptimeRobot free · <b>personal use only</b></span>
-      <span>Webhooks <b>behind Pro</b></span>
-      <span>Status pages <b>$29–39/mo</b></span>
-      <span>Better Stack paid <b>−$34/mo</b> · overkill for “is it up”</span>
-      <span>Cronitor <b>−$10/mo</b> if you buy it</span>
-      <span>If you buy both <b>$528/yr</b></span>
+      <span>Datadog · observability · <b>enterprise bill</b></span>
+      <span>UptimeRobot · webhooks <b>behind Pro</b></span>
+      <span>Cronitor · now <b>$2/monitor + $5/user</b></span>
+      <span>Better Stack · uptime from <b>$21/mo</b></span>
+      <span>Your Cloudflare free plan · <b>100k requests/day</b></span>
+      <span>IndieStack · <b>$120 once</b> · your D1, your R2</span>
+      <span>Datadog · observability · <b>enterprise bill</b></span>
+      <span>UptimeRobot · webhooks <b>behind Pro</b></span>
+      <span>Cronitor · now <b>$2/monitor + $5/user</b></span>
+      <span>Better Stack · uptime from <b>$21/mo</b></span>
+      <span>Your Cloudflare free plan · <b>100k requests/day</b></span>
+      <span>IndieStack · <b>$120 once</b> · your D1, your R2</span>
     </div>
   </div>
 
   <header class="hero">
     <div class="floor" aria-hidden="true"></div>
     <div class="wrap">
-      <div class="kicker"><span class="dot"></span> You shipped. Then the paywall.</div>
-      <h1>Free monitoring ended when you started charging.<br/><em>That’s a Worker.</em></h1>
-      <p class="lede">UptimeRobot’s free plan is personal-use. A product is commercial. Webhooks and a real status page sit behind Pro. Heartbeats are a second product. Most of you already hit <strong>one</strong> of those walls. If you buy paid uptime <em>and</em> Cronitor, the stack they sell is <strong>$528/year</strong>. IndieStack is one Worker on the Cloudflare free plan you already have. $120 once. Deploy this afternoon.</p>
+      <div class="kicker"><span class="dot"></span> From indie hackers, for indie hackers</div>
+      <h1>Stop renting monitoring. <em>Own the stack.</em></h1>
+      <p class="lede">Datadog bills like an enterprise. UptimeRobot paywalls webhooks. Cronitor just went per-monitor. I built IndieStack so you’d never rent ops again: <strong>uptime, cron heartbeats, logs, site analytics, deploy checks and a status page</strong> — one Worker on your own Cloudflare account. Your D1. Your R2. Your data. <strong>$120 once.</strong></p>
       <div class="cta-row">
-        <a class="btn primary lg" href="#price">Skip the paywall · $120</a>
-        <a class="btn ghost lg" href="https://indiestack.manol-trendafilov.workers.dev/">See the live Worker</a>
+        <a class="btn primary lg" href="#price">Own the stack · $120</a>
+        <a class="btn ghost lg" href="https://indiestack.manol-trendafilov.workers.dev/" target="_blank" rel="noopener">See the live Worker</a>
       </div>
-      <p class="fine">Discord when it dies. The Worker runs on Cloudflare — not on the origin it watches. One sitting. Payback vs the stacked bill: 11 weeks.</p>
+      <p class="fine">20 monitors · 20 heartbeats · 10 log sources · 3 analytics sites · 10 deploy targets — sized to fit Cloudflare Free. Discord, Telegram or email when it dies. Pay once, updates forever.</p>
     </div>
   </header>
 
@@ -433,14 +453,14 @@
         </div>
         <div class="row">
           <span class="led up"></span>
-          <div class="name">postgres 5432</div>
-          <div class="url">tcp</div>
-          <span class="ms">open</span><span class="ms">31ms</span>
+          <div class="name">vercel · web prod</div>
+          <div class="url">deploy · connected by token</div>
+          <span class="ms">ready</span><span class="ms">2h ago</span>
         </div>
         <div class="row">
           <span class="led up"></span>
-          <div class="name">example.com ssl</div>
-          <div class="url">expiry · 84d</div>
+          <div class="name">github · api ci</div>
+          <div class="url">deployments · main</div>
           <span class="ms">ok</span><span class="ms">daily</span>
         </div>
         <div class="row">
@@ -456,24 +476,24 @@
   <div class="wrap">
     <div class="math">
       <div class="stat">
-        <span class="tag">Before · if you buy both</span>
-        <div class="n">$528/yr</div>
-        <div class="l">Paid uptime $408 + Cronitor $120. Most of you already pay for one: commercial ToS, webhooks on Pro, or a $29+ status page. Better Stack at $34/mo is overkill for “is it up?”</div>
+        <span class="tag">Before · the rented stack</span>
+        <div class="n">$432/yr</div>
+        <div class="l">Better Stack uptime from $21/mo billed yearly ($252/yr) + Cronitor at $15/mo for 5 monitors + 1 user ($180/yr). That’s the pair they’d sell you today — checked on their pricing pages, Sep 2026. Most indies hit one paywall first: commercial-use ToS, webhooks, or a status page.</div>
       </div>
       <div class="stat">
         <span class="tag">After</span>
         <div class="n save">$0/mo</div>
-        <div class="l">Your Worker. Your D1. Discord when the site or the backup dies. Public status on your domain. No second bill.</div>
+        <div class="l">Your Worker on the Cloudflare free plan you already have: 100k requests/day, 100k D1 writes, your own R2. The monitoring rides infra you already own — no second invoice ever arrives.</div>
       </div>
       <div class="stat">
         <span class="tag">Bridge</span>
         <div class="n">$120</div>
-        <div class="l">IndieStack, once. Deploy in one sitting. If you were going to buy both, year two you keep $528. If you only hit one paywall, you still stop paying it.</div>
+        <div class="l">Once. You keep the repo, you keep the data, updates forever. If you were going to rent both tools, this pays for itself in ~14 weeks — then keeps paying you $432 a year.</div>
       </div>
     </div>
   </div>
 
-  <section id="what">
+  <section id="stack">
     <div class="wrap">
       <h2>The mechanism: a Worker that isn’t on your origin.</h2>
       <p class="sub">If the monitor shares the box with the app, it dies with the app — that’s the Kuma trap. IndieStack runs on Cloudflare, not on the VPS it watches. You deploy it to the account you already have. D1, R2, one cron. The Worker <em>is</em> the monitor.</p>
@@ -488,7 +508,7 @@
           <em>02</em>
           <div class="tag">heartbeat</div>
           <h3>Did the job run?</h3>
-          <p>Your cron hits <code>/beat/&lt;token&gt;</code>. If it goes quiet past interval + grace, Discord/Slack fires. IndieStack does not run the job. It notices the job did not run.</p>
+          <p>Your cron hits <code>/beat/&lt;token&gt;</code>. If it goes quiet past interval + grace, your channel fires. IndieStack does not run the job. It notices the job did not run.</p>
         </article>
         <article class="q">
           <em>03</em>
@@ -502,13 +522,13 @@
 
   <section>
     <div class="wrap">
-      <h2>Caps are the product. That’s how you stay on free.</h2>
-      <p class="sub">A typical indie — 10 URLs every 5 minutes + a few heartbeats — is a few thousand requests a day. Workers Free is 100k. You will not hit it. These limits exist so you cannot accidentally become a monitoring farm and blow the plan.</p>
+      <h2>A module system, not a plan tier.</h2>
+      <p class="sub">Every module below ships in the $120. No Pro column, no per-seat math, no “contact us”. Caps are the product — they’re how the whole thing stays on the Cloudflare free plan you already pay nothing for.</p>
       <div class="bento">
         <div class="feat big">
           <b>20 uptime monitors</b>
           <span>HTTPS, HTTP, TCP (443, SSH, Postgres, Redis, SMTP), host-up, DNS A/AAAA/MX, SSL expiry, domain expiry. Interval 1–60 min.</span>
-          <span class="ben">So 10 URLs × 5 min stays ~6k checks/day. You don’t buy Pro for 60-second checks you won’t use.</span>
+          <span class="ben">10 URLs × 5 min ≈ 6k checks/day against a 100k/day free plan. You don’t buy Pro for 60-second checks you won’t use.</span>
         </div>
         <div class="feat">
           <b>20 cron heartbeats</b>
@@ -521,65 +541,111 @@
           <span class="ben">Errors you can grep. Not a Datadog bill.</span>
         </div>
         <div class="feat">
-          <b>1 public status page</b>
-          <span>Your Worker’s <code>/</code>. <code>/health</code> is 200 or 503. <code>/health.json</code> for scripts.</span>
-          <span class="ben">r/SaaS: status pages start at $29–39/mo. Yours is <code>/</code> on the Worker.</span>
+          <b>Site analytics · 3 sites</b>
+          <span>Cookie-free pageviews, uniques, events and goals from a one-line snippet. Revenue attribution via your own Stripe webhook. AI-crawler tracking. Public share links, embeddable badges.</span>
+          <span class="ben">Capped at 2,000 views/site/day, 30-day retention — a viral spike can’t eat your D1 quota.</span>
         </div>
         <div class="feat">
-          <b>Discord / Slack / webhook</b>
-          <span>Down and up. Cloudflare Free does not send mail.</span>
-          <span class="ben">UptimeRobot put webhooks behind Pro. Discord is included. SMS is why people stay on paid UR.</span>
+          <b>Deploy monitors · GitHub + Vercel</b>
+          <span>Connect with your own token. Failed production deploys fire the same alerts as downtime.</span>
+          <span class="ben">“Is it up?” now includes “did the deploy break it?” — your agent sees what shipped.</span>
+        </div>
+        <div class="feat">
+          <b>Discord · Telegram · email · webhook</b>
+          <span>Discord/Slack/generic webhook, Telegram bot, email via Resend. Same alert, all channels.</span>
+          <span class="ben">UptimeRobot puts webhooks behind Pro. Here every channel is in the box.</span>
+        </div>
+        <div class="feat">
+          <b>1 public status page</b>
+          <span>Your Worker’s <code>/</code>. <code>/health</code> is 200 or 503. <code>/health.json</code> for scripts.</span>
+          <span class="ben">Status pages start at $15–29/mo elsewhere. Yours is <code>/</code> on the Worker.</span>
         </div>
         <div class="limits" id="limits">
           <h3>Designed to fit Cloudflare Free</h3>
           <table>
             <tr><td>5 cron triggers / account</td><td>We use <b>one</b> tick (<code>* * * * *</code>). Jobs are rows, not extra crons.</td></tr>
             <tr><td>100k Worker requests / day</td><td>20 URLs × 5 min ≈ 6k checks/day. Headroom for your actual app.</td></tr>
-            <tr><td>100k D1 writes / day</td><td>Two writes per HTTP check. Heartbeats write on beat/miss. Logs skip D1.</td></tr>
+            <tr><td>100k D1 writes / day</td><td>Two writes per HTTP check. Heartbeats write on beat/miss. Analytics is capped per site per day. Logs skip D1.</td></tr>
             <tr><td>10 ms CPU (free)</td><td><code>fetch()</code> wait is free. Bodies capped at 64KB, only read for keywords.</td></tr>
-            <tr><td>No email on free</td><td>Webhooks only. If you need SMS, keep UptimeRobot.</td></tr>
+            <tr><td>No email on free</td><td>Discord, Telegram and webhooks are native. Email rides your own Resend key.</td></tr>
           </table>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="replace">
+  <section id="own">
     <div class="wrap">
-      <h2>The stack they sell if you buy both.</h2>
-      <p class="sub">Most indies hit <strong>one</strong> paywall: commercial ToS, webhooks, or a status page. The $528 is what it costs if you buy paid uptime <em>and</em> Cronitor — not a claim that you already pay both. Prices from <a href="https://canivibecodeit.com">canivibecodeit.com</a>. Pingdom and Checkly are substitutes. Don’t add them.</p>
-      <div class="kills">
-        <article class="kill">
-          <div class="was">$408</div>
-          <h3>Better Stack / UptimeRobot paid</h3>
-          <p>Indie roundups: $34/mo is overkill for “is the site up?” UR free is personal-use; webhooks are Pro. We take HTTP + status + Discord, on your D1.</p>
-          <div class="fit yes">Named pair · in the $528</div>
+      <h2>The real difference isn’t price. It’s ownership.</h2>
+      <p class="sub">Free tiers are bait; the invoice is the product. IndieStack flips the trade: it deploys into <em>your</em> Cloudflare account and writes to <em>your</em> D1 and R2. Nobody can upseat you, shut you down, or hold your URLs hostage.</p>
+      <div class="honest">
+        <div class="box skip">
+          <h3>What a SaaS monitor holds</h3>
+          <p>Your URLs. Your error payloads. Your traffic numbers. Your on-call nerves — metered monthly. Cancel the card and the monitoring disappears the same day.</p>
+        </div>
+        <div class="box keep">
+          <h3>What you hold with IndieStack</h3>
+          <p>The repo. The Worker. The D1 tables. The R2 objects. A JSON export of everything. Cancel <em>us</em> and the stack keeps running — updates are the only thing that stops.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="ai">
+    <div class="wrap">
+      <h2>AI SRE is a model with access. Here’s the access.</h2>
+      <p class="sub">Every monitoring SaaS now sells an “AI SRE” add-on. The honest version: an AI SRE is an LLM reading your ops data — and that data lives in <em>your</em> Worker. So IndieStack ships the connection layer and skips the upsell. Bring your own agent.</p>
+      <div class="qs">
+        <article class="q">
+          <em>01</em>
+          <div class="tag">agents.md</div>
+          <h3>A public how-to for machines</h3>
+          <p>Every instance serves <code>/agents.md</code> — endpoints, auth, etiquette — so any agent can onboard itself in one fetch. No SDK, no vendor lock.</p>
         </article>
-        <article class="kill">
-          <div class="was">$120</div>
-          <h3>Cronitor</h3>
-          <p>If you buy it: $10/mo. Healthchecks.io does the same job free for 20 checks. We fold the heartbeat into the Worker so you don’t run two tools.</p>
-          <div class="fit yes">Named pair · in the $528</div>
+        <article class="q">
+          <em>02</em>
+          <div class="tag">mcp</div>
+          <h3>Six tools, one endpoint</h3>
+          <p><code>POST /mcp/&lt;token&gt;</code> speaks MCP (stateless JSON-RPC): overview, monitors, heartbeats, deploys, incidents, analytics. Point Claude or Cursor at it.</p>
         </article>
-        <article class="kill">
-          <div class="was">varies</div>
-          <h3>Instatus</h3>
-          <p>Status pages start ~$29/mo. Yours is <code>/</code> on the Worker. No email subscribers — Discord is the alert.</p>
-          <div class="fit yes">Kinda · no subscriber list</div>
-        </article>
-        <article class="kill">
-          <div class="was">$180</div>
-          <h3>Pingdom</h3>
-          <p>Uptime checks from Cloudflare</p>
-          <div class="fit no">Substitute — don’t add it</div>
-        </article>
-        <article class="kill">
-          <div class="was">$288</div>
-          <h3>Checkly</h3>
-          <p>HTTP/API checks only. No Playwright synthetics.</p>
-          <div class="fit no">Skip</div>
+        <article class="q">
+          <em>03</em>
+          <div class="tag">tokens</div>
+          <h3>Scoped, revocable, yours</h3>
+          <p>Mint agent tokens in <code>/admin</code>. Read-only, shown last-used, revocable in one click. The agent sees your stack; it never sees your keys.</p>
         </article>
       </div>
+      <div class="cta-row" style="margin-top:22px">
+        <a class="btn primary lg" href="https://indiestack.manol-trendafilov.workers.dev/agents.md" target="_blank" rel="noopener">Onboard your AI · read /agents.md</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="replace">
+    <div class="wrap">
+      <h2>The stack they rent you today.</h2>
+      <p class="sub">Most indies hit <strong>one</strong> paywall first: commercial-use ToS, webhooks, or a status page. The $432 is the pair they’d sell you if you bought uptime <em>and</em> cron monitoring — not a claim that you already pay both.</p>
+      <div class="kills">
+        <article class="kill">
+          <div class="was">$252/yr</div>
+          <h3>Better Stack / UptimeRobot paid</h3>
+          <p>Better Stack uptime starts at $21/mo billed yearly ($25/mo monthly); UR Team is $34/mo and UR free is personal-use with webhooks behind Pro. We take HTTP + status + every alert channel, on your D1.</p>
+          <div class="fit yes">Named pair · in the $432</div>
+        </article>
+        <article class="kill">
+          <div class="was">$180/yr</div>
+          <h3>Cronitor</h3>
+          <p>Usage-priced: $2/mo per monitor + $5/mo per user — $15/mo for 5 monitors + 1 user, $55/mo for their own 20-monitor example. Healthchecks does one job free. We fold heartbeats into the Worker.</p>
+          <div class="fit yes">Named pair · in the $432</div>
+        </article>
+        <article class="kill">
+          <div class="was">$180+/yr</div>
+          <h3>Instatus / status pages</h3>
+          <p>Status pages run $15–29/mo. Yours is <code>/</code> on the Worker. No subscriber list — your alert channel is the pager.</p>
+          <div class="fit no">Kinda · no subscribers</div>
+        </article>
+      </div>
+      <p class="fine" style="margin-top:14px">Pingdom ($198/yr) and Checkly ($288/yr) are substitutes — you’d pick one uptime tool, not three, so they’re not added. Prices from vendor pricing pages, checked 2026-09-02.</p>
     </div>
   </section>
 
@@ -590,8 +656,8 @@
       <div class="steps">
         <div class="step">
           <div class="num">01</div>
-          <h3>Buy · $120</h3>
-          <p class="sub" style="margin:0">You get the Worker. Not a seat. Not a month. The code and the deploy button.</p>
+          <h3>Buy · $120, once</h3>
+          <p class="sub" style="margin:0">You get the repo and the deploy button. Not a seat. Not a month. Updates forever.</p>
         </div>
         <div class="step">
           <div class="num">02</div>
@@ -600,8 +666,8 @@
         </div>
         <div class="step">
           <div class="num">03</div>
-          <h3>Open /admin</h3>
-          <p class="sub" style="margin:0">A token is shown once. Copy it. Add your URL. Optional: Discord webhook + a cron heartbeat.</p>
+          <h3>Add monitors, connect, mint</h3>
+          <p class="sub" style="margin:0">Open <code>/admin</code>: a URL per monitor, your Discord or Telegram, GitHub/Vercel tokens for deploys, an agent token for your AI.</p>
         </div>
       </div>
     </div>
@@ -610,15 +676,15 @@
   <section>
     <div class="wrap">
       <h2>Be honest about what you give up.</h2>
-      <p class="sub">If you need these, keep paying the SaaS. IndieStack is “Discord pings me when the site or the backup dies.”</p>
+      <p class="sub">If you need these, keep paying the SaaS. IndieStack is “my channels ping me when the site, the job, the deploy, or the backup dies.”</p>
       <div class="honest">
         <div class="box keep">
           <h3>You keep</h3>
-          <p>Uptime, keyword, status codes, slow checks, TCP ports, DNS, SSL/domain expiry, cron heartbeats, a status page on your domain, Discord/Slack, 24h error ingest, JSON backup, the data.</p>
+          <p>Uptime, keyword, status codes, slow checks, TCP ports, DNS, SSL/domain expiry, cron heartbeats, deploy monitoring, a status page on your domain, Discord/Slack/Telegram/email, site analytics, 24h error ingest, <code>/agents.md</code> + MCP, JSON backup — and the data, in your account.</p>
         </div>
         <div class="box skip">
           <h3>You skip</h3>
-          <p>SMS / voice, PagerDuty, multi-region confirm, 15-second intervals (Cloudflare cron is 1 min min), 50-monitor farms, team seats, status-page subscribers, Playwright flows, Datadog.</p>
+          <p>SMS / voice, PagerDuty, multi-region confirm, 15-second intervals (Cloudflare cron is 1 min min), 50-monitor farms, team seats, status-page subscribers, hosted “AI SRE” tiers, Datadog.</p>
         </div>
       </div>
     </div>
@@ -627,29 +693,30 @@
   <section id="price">
     <div class="wrap price-wrap">
       <div class="receipt">
-        <h3>Proof they will send this anyway</h3>
-        <div class="line"><span>Better Stack / UptimeRobot paid</span><b>$408/yr</b></div>
-        <div class="line"><span>Cronitor</span><b>$120/yr</b></div>
+        <h3>The receipt they’d send you</h3>
+        <div class="line"><span>Better Stack uptime (from $21/mo billed yearly)</span><b>$252/yr</b></div>
+        <div class="line"><span>Cronitor · 5 monitors + 1 user</span><b>$180/yr</b></div>
         <div class="line"><span>Cloudflare Workers Free</span><b>$0</b></div>
-        <div class="line total"><span>Every year, forever</span><b>$528</b></div>
-        <p class="fine" style="margin:16px 0 0">canivibecodeit.com: Cronitor $10/mo, Better Stack / UptimeRobot paid $34/mo. Pingdom $180 and Checkly $288 are not added — you’d pick one uptime tool, not three.</p>
+        <div class="line total"><span>Every year, forever</span><b>$432</b></div>
+        <p class="fine" style="margin:16px 0 0">Checked on vendor pricing pages, 2026-09-02. Pingdom $198/yr and Checkly $288/yr are not added — you’d pick one uptime tool, not three.</p>
       </div>
       <div class="buy">
         <span class="plabel">Promise</span>
-        <h3>Kill the $528/year stack.</h3>
+        <h3>Own the $432/year stack.</h3>
         <div class="big">$120 <small>once</small></div>
         <span class="plabel">Picture</span>
-        <p class="fine" style="margin:0">Your status page. Your D1. Discord when the backup misses. No second card on file.</p>
+        <p class="fine" style="margin:0">Your status page. Your D1. Your agent reading your ops data. No second card on file — ever.</p>
         <span class="plabel">Proof</span>
         <ul>
           <li>Live Worker is up — click “See the live Worker”</li>
-          <li>Caps sized to Workers Free (20 / 20 / 10)</li>
-          <li>CIVCI prices, not a made-up bundle</li>
-          <li>You keep the repo after you pay</li>
+          <li>Caps sized to Workers Free: 20 / 20 / 10 / 3 / 10</li>
+          <li>Prices verified on vendor pages, Sep 2026</li>
+          <li>You keep the repo. Updates forever. Not a subscription.</li>
         </ul>
         <span class="plabel">Push</span>
-        <a class="btn primary lg" href="#" style="width:100%">Cancel $528/year · $120</a>
-        <p class="fine" style="margin:12px 0 0;text-align:center">Deploy this afternoon. Payback ~11 weeks. Not a subscription.</p>
+        <!-- TODO: point at real checkout (Gumroad / Lemon Squeezy / Stripe) before launch -->
+        <a class="btn primary lg" href="#" style="width:100%">Own the stack · $120</a>
+        <p class="fine" style="margin:12px 0 0;text-align:center">Deploy this afternoon. Payback ~14 weeks.</p>
       </div>
     </div>
   </section>
@@ -659,37 +726,53 @@
       <h2>Questions builders actually ask</h2>
       <details open>
         <summary>Is this a hosted product?</summary>
-        <p>No. You deploy the Worker to your Cloudflare account. IndieStack never sees your URLs. The $120 is for the stack, not for us to run it.</p>
+        <p>No. You deploy the Worker to your Cloudflare account. IndieStack never sees your URLs, and your data never leaves your account. The $120 is for the stack and its updates, not for us to run it.</p>
       </details>
       <details>
         <summary>Will I blow the free plan?</summary>
-        <p>A typical indie setup — 10 URLs every 5 minutes + a few heartbeats — is a few thousand Worker requests and D1 writes per day. Free is 100k of each. Caps (20 / 20 / 10) exist so you cannot accidentally become a monitoring farm.</p>
+        <p>A typical indie — 10 URLs every 5 minutes, a few heartbeats — is a few thousand Worker requests and D1 writes per day against a 100k/day cap of each. Analytics is separately capped at 2,000 views/site/day. The caps exist so you cannot accidentally become a monitoring farm.</p>
       </details>
       <details>
         <summary>Why $120 if Cloudflare is free?</summary>
-        <p>Cloudflare is free. The weekend you’d spend rebuilding UptimeRobot + Cronitor + a status page is not. Cronitor alone is $120/year. Pay once, deploy, cancel the rest.</p>
+        <p>Cloudflare is free. The weekend you’d spend rebuilding UptimeRobot + Cronitor + a status page + analytics is not. Cronitor alone is usage-priced now; this is once. Pay, deploy, cancel the rest.</p>
+      </details>
+      <details>
+        <summary>“Pay once” — what does that actually buy?</summary>
+        <p>The repo and every future update to it. Pull, redeploy, done — the same one-button deploy as day one. What you never get is a bill.</p>
       </details>
       <details>
         <summary>Can I just vibecode this myself?</summary>
-        <p>Yes — that’s the whole canivibecodeit.com point. IndieStack is for when you’d rather ship the product you’re actually building, and still kill the $528 bill this afternoon.</p>
+        <p>Yes — that’s the whole canivibecodeit.com point, and the Workers AI age says go for it. IndieStack is for the weekend you’d rather ship the product you’re actually building.</p>
       </details>
       <details>
         <summary>What about Uptime Kuma / Healthchecks?</summary>
-        <p>Great if you want to babysit a VPS. IndieStack is the same job with no box to patch: one Worker, one D1, one R2, one cron, on infra you already have.</p>
+        <p>Kuma is great if you want to babysit a VPS — IndieStack is the same job with no box to patch, on infra you already have. Healthchecks is honest cron monitoring, but it’s still another vendor holding the data, and it doesn’t watch your sites, deploys, logs or traffic.</p>
+      </details>
+      <details>
+        <summary>How does the AI part work — do I need a subscription?</summary>
+        <p>No. The stack serves <code>/agents.md</code> and an MCP endpoint; you mint a token in <code>/admin</code> and point your own Claude, Cursor, or script at it. If your agent needs a subscription, that’s between you and your agent. We ship the access, not the upsell.</p>
       </details>
     </div>
   </section>
 
   <div class="wrap">
+    <div class="founder">
+      <div class="ava">MT</div>
+      <div class="who">
+        <b>Built by Manol T. — an indie hacker you can ping</b>
+        <span>20 years of dev · ex-funded pre-seed founder · building IndieStack in public. DMs open about the stack, the deploy, or the price.</span>
+      </div>
+      <a class="btn ghost" href="https://x.com/manol_ai" target="_blank" rel="noopener">Connect with me · @manol_ai ↗</a>
+    </div>
     <footer class="cta">
-      <div class="kicker" style="margin-bottom:18px"><span class="dot"></span> You already have the infra. You’re paying for the SaaS.</div>
-      <h2>Deploy the Worker. Cancel the stack.</h2>
-      <p class="sub" style="margin-left:auto;margin-right:auto">Uptime, cron heartbeats, status, 24h logs. On your account. $120 once. $408 back in year one. $528 every year after.</p>
-      <a class="btn primary lg" href="#price">Cancel $528/year · $120</a>
+      <div class="kicker" style="margin-bottom:18px"><span class="dot"></span> You already own the infra. Stop renting the SaaS.</div>
+      <h2>Deploy the Worker. Own the stack.</h2>
+      <p class="sub" style="margin-left:auto;margin-right:auto">Uptime, heartbeats, deploys, status, logs, analytics — on your account, in your D1, readable by your AI. $120 once. $432 a year back, every year after.</p>
+      <a class="btn primary lg" href="#price">Own the stack · $120</a>
     </footer>
     <div class="legal">
-      <span>IndieStack · one Worker, one user, $0 infra on Cloudflare Free</span>
-      <span>Replacement prices from canivibecodeit.com · not affiliated with Cloudflare</span>
+      <span>IndieStack · one Worker, one owner, $0 infra on Cloudflare Free</span>
+      <span>Replacement prices checked 2026-09-02 · not affiliated with Cloudflare</span>
     </div>
   </div>
 </body>

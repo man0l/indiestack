@@ -3,13 +3,40 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": ["./worker-configuration.d.ts"]
+    "types": [
+      "./worker-configuration.d.ts"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "$lib": [
+        "./admin/src/lib"
+      ],
+      "$lib/*": [
+        "./admin/src/lib/*"
+      ],
+      "$components": [
+        "./admin/src/lib"
+      ],
+      "$components/*": [
+        "./admin/src/lib/*"
+      ],
+      "$utils": [
+        "./admin/src/lib/utils"
+      ],
+      "$utils/*": [
+        "./admin/src/lib/utils/*"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

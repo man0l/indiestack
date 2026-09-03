@@ -6,13 +6,19 @@ import {
   safeEqual,
   setCookie,
 } from "./kernel/auth";
+import {
+  ALERT_SETTING_KEYS,
+  clearAlertError,
+  sendTestAlert,
+} from "./kernel/alert";
 import { PLUGINS } from "./kernel/catalog";
 import { getSetting, setSetting } from "./kernel/db";
 import { redirect } from "./kernel/http";
 import { collect, dispatch, firstKicker, sumHealth } from "./kernel/plugin";
 import { runTick } from "./kernel/tick";
+import { deployOverview } from "./integrations";
 import { parseHttpUrl } from "./kernel/util";
-import { adminPage, ago, html, loginPage, overallOf, revealPage, statusPage } from "./ui";
+import { adminShell, ago, html, loginPage, overallOf, revealPage, settingsCard, statusPage } from "./ui";
 
 export default {
   async fetch(request, env) {
@@ -43,6 +49,39 @@ async function handle(request: Request, env: Env): Promise<Response> {
   const routed = await dispatch(PLUGINS, "route", ctx);
   if (routed) return routed;
 
+  if (ctx.path.startsWith("/_app/") && ctx.method === "GET") {
+    const name = ctx.path.slice(6);
+    if (!name.includes("..") && !name.includes("\\")) {
+      const obj = await env.BUCKET.get(`assets/${name}`);
+      if (obj) return new Response(obj.body, { headers: { "content-type": obj.httpMetadata?.contentType ?? "application/javascript", "cache-control": "no-cache" } });
+    }
+  }
+
+  if (ctx.path === "/api/overview" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const cards = await collectNavCards(env, Date.now());
+    return Response.json({ cards });
+  }
+  if (ctx.path === "/api/monitors" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const monitors = await env.DB.prepare("SELECT * FROM monitors ORDER BY created_at").all();
+    return Response.json({ monitors: monitors.results ?? [] });
+  }
+  if (ctx.path === "/api/deploys" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    return Response.json(await deployOverview(env));
+  }
+  const apiPage = ctx.path.match(/^\/api\/page\/([\w-]+)$/);
+  if (apiPage && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const page = await buildAdminPage(env, ctx.origin, apiPage[1]);
+    return Response.json(page);
+  }
+
   if (ctx.path === "/health.json" && ctx.method === "GET") {
     return healthJson(env);
   }
@@ -71,7 +110,14 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const blocked = await gateAdmin(request, env);
     if (blocked) return blocked;
     if (ctx.path === "/admin" && ctx.method === "GET") {
-      return admin(env, ctx.origin, url.searchParams.get("msg"));
+      return adminOverview(env, ctx.origin, url.searchParams.get("msg"));
+    }
+    const pluginPage = ctx.path.match(/^\/admin\/p\/([\w-]+)$/);
+    if (pluginPage && ctx.method === "GET") {
+      if (pluginPage[1] === "settings") {
+        return adminSettingsPage(env, ctx.origin, url.searchParams.get("msg"));
+      }
+      return adminPluginPage(pluginPage[1], env, ctx.origin, url.searchParams.get("msg"));
     }
     if (ctx.path === "/admin/settings" && ctx.method === "POST") {
       return saveSettings(request, env);
@@ -81,6 +127,14 @@ async function handle(request: Request, env: Env): Promise<Response> {
       return redirect(
         `/admin?msg=${encodeURIComponent(`checked ${result.checked} · jobs ${result.jobs}`)}`,
       );
+    }
+    if (ctx.path === "/admin/test-alert" && ctx.method === "POST") {
+      const result = await sendTestAlert(env);
+      if (result.error) {
+        return redirect(`/admin?msg=${encodeURIComponent(`test failed: ${result.error}`)}`);
+      }
+      await clearAlertError(env).catch(() => {});
+      return redirect("/admin?msg=test%20alert%20sent");
     }
     const roll = ctx.path.match(/^\/admin\/rollups\/(\d{4}-\d{2}-\d{2})$/);
     if (roll && ctx.method === "GET") {
@@ -92,6 +146,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     const admined = await dispatch(PLUGINS, "admin", ctx);
     if (admined) return admined;
+    if (ctx.path.startsWith("/admin/")) return new Response("not found", { status: 404 });
     return new Response("not found", { status: 404 });
   }
 
@@ -118,34 +173,136 @@ async function status(env: Env, origin: string): Promise<Response> {
   return html(statusPage(env.APP_NAME, overall, kicker, sections, empty));
 }
 
-async function admin(env: Env, origin: string, msg: string | null): Promise<Response> {
-  const sectionCtx = { env, origin, title: env.APP_NAME };
-  const sections = await collect(PLUGINS, "adminSection", sectionCtx);
-  const summaries = await collect(PLUGINS, "summary", sectionCtx);
-  const webhook = (await getSetting(env.DB, "webhook_url")) ?? "";
-  const listed = await env.BUCKET.list({ prefix: "rollups/" });
-  const rollups = listed.objects
-    .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
-    .sort()
-    .reverse();
-  const footers = [
-    ...PLUGINS.map((p) => p.adminFooter).filter((s): s is string => Boolean(s)),
-    "Mute times are UTC.",
-  ];
-  return html(
-    adminPage(env.APP_NAME, sections, summaries, webhook, rollups, footers, msg ?? undefined),
+async function adminOverview(env: Env, origin: string, msg: string | null): Promise<Response> {
+  return renderAdminPage(env, origin, "overview", msg);
+}
+
+async function adminPluginPage(pluginId: string, env: Env, origin: string, msg: string | null): Promise<Response> {
+  const match = PLUGINS.find((p) => p.id === pluginId);
+  if (!match || !match.adminNav) return new Response("not found", { status: 404 });
+  return renderAdminPage(env, origin, pluginId, msg);
+}
+
+async function adminSettingsPage(env: Env, origin: string, msg: string | null): Promise<Response> {
+  return renderAdminPage(env, origin, "settings", msg);
+}
+
+async function buildAdminPage(
+  env: Env,
+  origin: string,
+  activeId: string,
+): Promise<{ activeId: string; cards: any[]; content: string; island: string | null; footer: string | null }> {
+  const now = Date.now();
+  const cards = await collectNavCards(env, now);
+  let content: string;
+  let island: string | null = null;
+  let footer: string | null = null;
+  if (activeId === "overview") {
+    island = "overview";
+    content = overviewCards(cards);
+  } else if (activeId === "settings") {
+    const settings = await loadSettings(env, [...ALERT_SETTING_KEYS, "last_alert_error"]);
+    const listed = await env.BUCKET.list({ prefix: "rollups/" });
+    const rollups = listed.objects
+      .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
+      .sort()
+      .reverse();
+    content = settingsCard(settings, rollups);
+  } else {
+    const plugin = PLUGINS.find((p) => p.id === activeId);
+    if (!plugin || !plugin.adminSection) content = `<p class="sub">Not found.</p>`;
+    else content = await plugin.adminSection({ env, origin, title: env.APP_NAME });
+    footer = plugin?.adminFooter ?? null;
+    // Islands exist per plugin; the Svelte bundle replaces this div's content on mount.
+    if (["ping", "integrations"].includes(activeId)) island = activeId;
+  }
+  return { activeId, cards, content, island, footer };
+}
+
+async function renderAdminPage(
+  env: Env,
+  origin: string,
+  activeId: string,
+  msg: string | null,
+): Promise<Response> {
+  const page = await buildAdminPage(env, origin, activeId);
+  return html(adminShell({ title: env.APP_NAME, activeId: page.activeId, cards: page.cards, content: page.content, flash: msg ?? undefined, island: page.island }));
+}
+
+function overviewCards(cards: Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }>): string {
+  if (cards.length === 0) return `<p class="sub">No modules yet.</p>`;
+  return `<div class="cards">` + cards.map((c) =>
+    `<a class="pcard" href="${c.href}">
+      <div class="dot ${c.dot}" style="width:8px;height:8px;border-radius:50%;background:var(--mute);display:inline-block;margin-right:6px;vertical-align:middle"></div>
+      <b style="display:inline">${c.label}</b>
+      ${c.summary ? `<div class="sub" style="margin:6px 0 0">${c.summary}</div>` : ""}
+    </a>`
+  ).join("") + `</div>`;
+}
+
+async function collectNavCards(env: Env, now: number): Promise<Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }>> {
+  const sectionCtx = { env, origin: "", title: env.APP_NAME };
+  const summaries = new Map<string, string>();
+  for (const p of PLUGINS) {
+    if (p.summary) {
+      try { summaries.set(p.id, await p.summary(sectionCtx) || ""); } catch { summaries.set(p.id, ""); }
+    }
+  }
+  const cards: Array<{ id: string; label: string; group: string; summary: string; dot: string; href: string }> = [];
+  for (const p of PLUGINS) {
+    if (!p.adminNav) continue;
+    // health dot: if the plugin exposes health, sample it
+    let dot = "unknown";
+    if (p.health) {
+      try {
+        const h = await p.health(env, now);
+        if ((h.down ?? 0) > 0) dot = "down";
+        else if ((h.up ?? 0) > 0) dot = "up";
+        else dot = "unknown";
+      } catch {}
+    }
+    const nav = p.adminNav;
+    cards.push({ id: p.id, label: nav.label, group: nav.group, summary: summaries.get(p.id) ?? "", dot, href: `/admin/p/${p.id}` });
+  }
+  const hasRevenue = cards.some((c) => c.id === "revenue");
+  cards.push({ id: "settings", label: "settings", group: "system", summary: hasRevenue ? "" : "", dot: "unknown", href: "/admin/p/settings" });
+  return cards;
+}
+
+const SETTING_FORM_KEYS = [
+  "webhook_url",
+  "telegram_bot_token",
+  "telegram_chat_id",
+  "resend_api_key",
+  "alert_email",
+  "alert_from",
+];
+
+async function loadSettings(env: Env, keys: readonly string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(
+    keys.map(async (key) => {
+      out[key] = (await getSetting(env.DB, key)) ?? "";
+    }),
   );
+  return out;
 }
 
 async function saveSettings(request: Request, env: Env): Promise<Response> {
   const form = await request.formData();
-  const webhook = String(form.get("webhook_url") ?? "").trim();
-  if (webhook) {
-    const parsed = parseHttpUrl(webhook);
-    if (!parsed) return redirect("/admin?msg=bad%20webhook");
-    await setSetting(env.DB, "webhook_url", parsed.toString());
-  } else {
-    await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind("webhook_url").run();
+  for (const key of SETTING_FORM_KEYS) {
+    const value = String(form.get(key) ?? "").trim();
+    if (key === "webhook_url" && value) {
+      const parsed = parseHttpUrl(value);
+      if (!parsed) return redirect("/admin?msg=bad%20webhook");
+      await setSetting(env.DB, key, parsed.toString());
+      continue;
+    }
+    if (value) {
+      await setSetting(env.DB, key, value.slice(0, 200));
+    } else {
+      await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
+    }
   }
   return redirect("/admin?msg=saved");
 }

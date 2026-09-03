@@ -10,6 +10,9 @@ export type Backup = {
     log_sources: unknown[];
     settings: Record<string, string>;
     checks: unknown[];
+    deploy_targets: unknown[];
+    agent_tokens: unknown[];
+    analytics_sites: unknown[];
   };
   r2: {
     rollups: Record<string, unknown>;
@@ -23,6 +26,12 @@ export async function buildBackup(env: Env): Promise<Backup> {
   const log_sources = await all<{ id: string }>(
     env.DB,
     "SELECT * FROM log_sources ORDER BY created_at ASC",
+  );
+  const deploy_targets = await all(env.DB, "SELECT * FROM deploy_targets ORDER BY created_at ASC");
+  const agent_tokens = await all(env.DB, "SELECT * FROM agent_tokens ORDER BY created_at ASC");
+  const analytics_sites = await all(
+    env.DB,
+    "SELECT * FROM analytics_sites ORDER BY created_at ASC",
   );
   const settingRows = await all<{ key: string; value: string }>(env.DB, "SELECT key, value FROM settings");
   const settings: Record<string, string> = {};
@@ -63,7 +72,7 @@ export async function buildBackup(env: Env): Promise<Backup> {
     v: 1,
     exported_at: Date.now(),
     app: env.APP_NAME,
-    d1: { monitors, jobs, log_sources, settings, checks },
+    d1: { monitors, jobs, log_sources, settings, checks, deploy_targets, agent_tokens, analytics_sites },
     r2: { rollups, log_events },
   };
 }
@@ -82,6 +91,9 @@ export type RestoreStats = {
   log_sources: number;
   settings: number;
   checks: number;
+  deploy_targets: number;
+  agent_tokens: number;
+  analytics_sites: number;
   rollups: number;
   log_events: number;
 };
@@ -115,6 +127,9 @@ export function parseBackup(raw: string): Backup {
       log_sources: Array.isArray(d1.log_sources) ? d1.log_sources : [],
       settings,
       checks: Array.isArray(d1.checks) ? d1.checks : [],
+      deploy_targets: Array.isArray(d1.deploy_targets) ? d1.deploy_targets : [],
+      agent_tokens: Array.isArray(d1.agent_tokens) ? d1.agent_tokens : [],
+      analytics_sites: Array.isArray(d1.analytics_sites) ? d1.analytics_sites : [],
     },
     r2: {
       rollups:
@@ -213,6 +228,72 @@ export async function restoreBackup(env: Env, backup: Backup): Promise<RestoreSt
     );
   }
 
+  for (const raw of backup.d1.deploy_targets) {
+    const t = asRec(raw);
+    const id = str(t.id);
+    if (!id) continue;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO deploy_targets (
+           id, provider, name, repo, project, team, interval_min, enabled, status,
+           last_check_at, last_detail, last_error, consecutive, mute_until, nag_min,
+           last_nag_at, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        id,
+        str(t.provider, "github") === "vercel" ? "vercel" : "github",
+        str(t.name, id).slice(0, 40),
+        nulstr(t.repo),
+        nulstr(t.project),
+        nulstr(t.team),
+        int(t.interval_min, 5),
+        int(t.enabled, 1),
+        str(t.status, "unknown"),
+        nulint(t.last_check_at),
+        nulstr(t.last_detail),
+        nulstr(t.last_error),
+        int(t.consecutive, 0),
+        nulint(t.mute_until),
+        int(t.nag_min, 0),
+        nulint(t.last_nag_at),
+        int(t.created_at, Date.now()),
+      ),
+    );
+  }
+
+  for (const raw of backup.d1.agent_tokens) {
+    const a = asRec(raw);
+    const id = str(a.id);
+    const token = str(a.token);
+    if (!id || !token) continue;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO agent_tokens (id, name, token, enabled, last_used_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        id,
+        str(a.name, id).slice(0, 40),
+        token,
+        int(a.enabled, 1),
+        nulint(a.last_used_at),
+        int(a.created_at, Date.now()),
+      ),
+    );
+  }
+
+  for (const raw of backup.d1.analytics_sites) {
+    const s = asRec(raw);
+    const id = str(s.id);
+    const token = str(s.token);
+    if (!id || !token) continue;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO analytics_sites (id, name, token, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(id, str(s.name, id).slice(0, 40), token, int(s.enabled, 1), int(s.created_at, Date.now())),
+    );
+  }
+
   for (const [key, value] of Object.entries(backup.d1.settings)) {
     stmts.push(
       env.DB.prepare(
@@ -296,6 +377,9 @@ export async function restoreBackup(env: Env, backup: Backup): Promise<RestoreSt
     log_sources: backup.d1.log_sources.length,
     settings: Object.keys(backup.d1.settings).length,
     checks: backup.d1.checks.length,
+    deploy_targets: backup.d1.deploy_targets.length,
+    agent_tokens: backup.d1.agent_tokens.length,
+    analytics_sites: backup.d1.analytics_sites.length,
     rollups,
     log_events,
   };

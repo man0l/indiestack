@@ -13,6 +13,7 @@ export async function listJobs(db: D1Database): Promise<Job[]> {
 
 export const heartbeat: Plugin = {
   id: "heartbeat",
+  adminNav: { group: "monitoring", label: "heartbeats" },
   adminFooter: "A heartbeat alerts on the first miss after grace.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM jobs").first<{ n: number }>();
@@ -47,8 +48,8 @@ export const heartbeat: Plugin = {
       last: row?.last ?? null,
     };
   },
-  async tick(env, now, webhook) {
-    const r = await scanHeartbeats(env, now, webhook);
+  async tick(env, now) {
+    const r = await scanHeartbeats(env, now);
     return { jobs: r.scanned, alerts: r.alerts };
   },
   async route(ctx: RouteCtx) {

@@ -7,6 +7,7 @@ import { applyTemplate, TEMPLATES } from "./index";
 
 export const templates: Plugin = {
   id: "templates",
+  adminNav: { group: "monitoring", label: "templates" },
   adminSection(_ctx: SectionCtx) {
     return `<h2>templates</h2>
     <form class="card" method="post" action="/admin/templates">

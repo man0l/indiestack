@@ -1,5 +1,5 @@
 import { connect } from "cloudflare:sockets";
-import { flushAlerts } from "../kernel/alert";
+import { notifyAll } from "../kernel/alert";
 import { MAX_MONITORS, type Monitor } from "../kernel/types";
 import { readCapped, trunc } from "../kernel/util";
 import { kindOf, parseHostPort } from "./target";
@@ -363,11 +363,7 @@ async function httpReachable(hostname: string, port: number, timeout_ms: number)
   }
 }
 
-export async function runPings(
-  env: Env,
-  now: number,
-  webhook: string | null,
-): Promise<{ checked: number; alerts: number }> {
+export async function runPings(env: Env, now: number): Promise<{ checked: number; alerts: number }> {
   const due = await env.DB.prepare(
     `SELECT * FROM monitors
      WHERE enabled = 1
@@ -431,7 +427,7 @@ export async function runPings(
     }
 
     await env.DB.batch(stmts);
-    alerts += await flushAlerts(webhook, pendingAlerts);
+    alerts += await notifyAll(env, pendingAlerts);
   }
 
   return { checked: monitors.length, alerts };
