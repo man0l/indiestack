@@ -1,3 +1,5 @@
+import { trunc } from "../kernel/util";
+
 export const MAX_ANALYTICS_SITES = 3;
 export const MAX_HITS_PER_SITE_DAY = 2000;
 export const MAX_PATH = 200;
@@ -48,13 +50,13 @@ export function collectorScript(): string {
     if(navigator.sendBeacon) navigator.sendBeacon(o+path,b);
     else fetch(o+path,{method:"POST",body:b,keepalive:true});
   }
-  function pv(){post("/hit",{p:location.pathname.slice(0,200),r:(document.referrer||"").slice(0,200),w:window.innerWidth||0});}
+  function pv(){post("/hit",{p:location.pathname.slice(0,200),q:location.search.slice(0,300),r:(document.referrer||"").slice(0,500),w:window.innerWidth||0});}
   function nav(){
     if(location.pathname!==last){last=location.pathname;pv();}
   }
   window.df={
-    track:function(n){try{post("/event",{e:String(n).slice(0,40),p:location.pathname.slice(0,200),r:(document.referrer||"").slice(0,200)});}catch(_){}},
-    identify:function(m){try{post("/event",{i:String(m).slice(0,120),p:location.pathname.slice(0,200),r:(document.referrer||"").slice(0,200)});}catch(_){}}
+    track:function(n){try{post("/event",{e:String(n).slice(0,40),p:location.pathname.slice(0,200),r:(document.referrer||"").slice(0,500)});}catch(_){}},
+    identify:function(m){try{post("/event",{i:String(m).slice(0,120),p:location.pathname.slice(0,200),r:(document.referrer||"").slice(0,500)});}catch(_){}}
   };
   pv();
   if(history.pushState){
@@ -65,7 +67,7 @@ export function collectorScript(): string {
 })();`;
 }
 
-export type HitPayload = { s: string; p: string; r?: string | null; w?: number; v?: string | null };
+export type HitPayload = { s: string; p: string; r?: string | null; q?: string | null; w?: number; v?: string | null };
 
 /** Persistent-mode client ID: random UUID-ish, not free text. */
 export const CLIENT_VID_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -79,11 +81,166 @@ export function parseHit(raw: string): HitPayload | null {
     if (p.startsWith("/beat") || p.startsWith("/log") || p.startsWith("/hit") || p.startsWith("/mcp")) {
       p = "/";
     }
-    const r = typeof v.r === "string" && v.r ? v.r.slice(0, MAX_PATH) : null;
+    const r = typeof v.r === "string" && v.r ? v.r.slice(0, 500) : null;
+    const q = typeof v.q === "string" && v.q ? v.q.slice(0, 300) : null;
     const cv = typeof v.v === "string" && CLIENT_VID_RE.test(v.v) ? v.v : null;
-    return { s, p, r, v: cv };
+    return { s, p, r, q, v: cv };
   } catch {
     return null;
+  }
+}
+
+// ------------------------------------------------------- hit enrichment
+
+export type RefClass = "search" | "ai" | "social" | "direct" | "other";
+
+export type RefInfo = {
+  refClass: RefClass;
+  refSource: string | null;
+  searchTerm: string | null;
+  refPath: string | null;
+  refHost: string | null;
+};
+
+const AI_HOSTS: Record<string, string> = {
+  "chatgpt.com": "chatgpt",
+  "chat.openai.com": "chatgpt",
+  "openai.com": "chatgpt",
+  "perplexity.ai": "perplexity",
+  "gemini.google.com": "gemini",
+  "copilot.microsoft.com": "copilot",
+  "claude.ai": "claude",
+  "anthropic.com": "claude",
+  "duck.ai": "duckduckgo-ai",
+  "deepseek.com": "deepseek",
+  "grok.com": "grok",
+  "poe.com": "poe",
+  "mistral.ai": "mistral",
+};
+
+const SEARCH_HOSTS: Record<string, { source: string; params: string[] }> = {
+  "google.com": { source: "google", params: ["q"] },
+  "bing.com": { source: "bing", params: ["q"] },
+  "duckduckgo.com": { source: "duckduckgo", params: ["q"] },
+  "search.brave.com": { source: "brave", params: ["q"] },
+  "ecosia.org": { source: "ecosia", params: ["q"] },
+  "startpage.com": { source: "startpage", params: ["query"] },
+  "qwant.com": { source: "qwant", params: ["q"] },
+  "yandex.com": { source: "yandex", params: ["text"] },
+  "yandex.ru": { source: "yandex", params: ["text"] },
+  "baidu.com": { source: "baidu", params: ["wd"] },
+  "kagi.com": { source: "kagi", params: ["q"] },
+  "mojeek.com": { source: "mojeek", params: ["q"] },
+};
+
+const SOCIAL_HOSTS: Record<string, string> = {
+  "x.com": "x",
+  "twitter.com": "x",
+  "reddit.com": "reddit",
+  "linkedin.com": "linkedin",
+  "news.ycombinator.com": "hn",
+  "producthunt.com": "producthunt",
+  "facebook.com": "facebook",
+  "instagram.com": "instagram",
+  "tiktok.com": "tiktok",
+  "youtube.com": "youtube",
+  "bsky.app": "bluesky",
+  "mastodon.social": "mastodon",
+  "threads.net": "threads",
+};
+
+function hostMatches(host: string, key: string): boolean {
+  return host === key || host.endsWith(`.${key}`);
+}
+
+/** Classify a raw referrer URL: class, source, search term, referring path. */
+export function classifyReferrer(raw: string | null): RefInfo {
+  const none: RefInfo = { refClass: "direct", refSource: null, searchTerm: null, refPath: null, refHost: null };
+  if (!raw) return none;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return { ...none, refClass: "other" };
+  }
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  if (!host) return none;
+  const path = (u.pathname + (u.search || "")).slice(0, 300);
+  // AI hosts first — gemini.google.com must not fall into the google bucket.
+  for (const [key, source] of Object.entries(AI_HOSTS)) {
+    if (hostMatches(host, key)) {
+      const q = u.searchParams.get("q") || u.searchParams.get("query");
+      return {
+        refClass: "ai",
+        refSource: source,
+        searchTerm: q ? trunc(q.trim(), 120) : null,
+        refPath: path,
+        refHost: host,
+      };
+    }
+  }
+  for (const [key, cfg] of Object.entries(SEARCH_HOSTS)) {
+    if (hostMatches(host, key)) {
+      let term: string | null = null;
+      for (const p of cfg.params) {
+        const v = u.searchParams.get(p);
+        if (v && v.trim()) {
+          term = trunc(v.trim(), 120);
+          break;
+        }
+      }
+      return { refClass: "search", refSource: cfg.source, searchTerm: term, refPath: path, refHost: host };
+    }
+  }
+  for (const [key, source] of Object.entries(SOCIAL_HOSTS)) {
+    if (hostMatches(host, key)) {
+      return { refClass: "social", refSource: source, searchTerm: null, refPath: path, refHost: host };
+    }
+  }
+  return { refClass: "other", refSource: host, searchTerm: null, refPath: path, refHost: host };
+}
+
+/** Coarse device/browser/os buckets — enough for breakdowns, no dependency. */
+export function parseUA(ua: string): { device: string; browser: string; os: string } {
+  const s = ua.toLowerCase();
+  const device = /ipad|tablet|playbook|silk/.test(s)
+    ? "tablet"
+    : /mobi|iphone|android.*mobile|windows phone/.test(s)
+      ? "mobile"
+      : "desktop";
+  let browser = "other";
+  if (/edg\//.test(s)) browser = "edge";
+  else if (/opr\/|opera/.test(s)) browser = "opera";
+  else if (/firefox|fxios/.test(s)) browser = "firefox";
+  else if (/chrome|crios/.test(s)) browser = "chrome";
+  else if (/safari/.test(s)) browser = "safari";
+  let os = "other";
+  if (/windows/.test(s)) os = "windows";
+  else if (/iphone|ipad|ipod/.test(s)) os = "ios";
+  else if (/mac os x|macintosh/.test(s)) os = "macos";
+  else if (/android/.test(s)) os = "android";
+  else if (/linux/.test(s)) os = "linux";
+  return { device, browser, os };
+}
+
+const BOT_UA_RE = /bot|crawl|spider|slurp|headless|scrapy|python-requests|curl\/|wget|lighthouse|pagespeed/i;
+
+export function isBotUA(ua: string): boolean {
+  return BOT_UA_RE.test(ua);
+}
+
+/** UTM trio from a landing query string, capped. */
+export function parseUtm(query: string | null): { source: string | null; medium: string | null; campaign: string | null } {
+  if (!query) return { source: null, medium: null, campaign: null };
+  try {
+    const sp = new URLSearchParams(query.startsWith("?") ? query.slice(1) : query);
+    const pick = (k: string) => {
+      const v = sp.get(k);
+      return v && v.trim() ? trunc(v.trim(), 100) : null;
+    };
+    return { source: pick("utm_source"), medium: pick("utm_medium"), campaign: pick("utm_campaign") };
+  } catch {
+    return { source: null, medium: null, campaign: null };
   }
 }
 
@@ -138,7 +295,12 @@ export async function recordHit(
   payload: HitPayload,
   country: string | null,
   ip: string,
+  ua: string,
+  city: string | null,
+  region: string | null,
 ): Promise<RecordHitResult> {
+  // Beacons come from real browsers; crawlers never beacon, but faked ones must not pollute stats.
+  if (isBotUA(ua)) return { ok: true, counted: false };
   const site = await env.DB.prepare(
     "SELECT id, token, id_mode FROM analytics_sites WHERE token = ? AND enabled = 1",
   )
@@ -160,17 +322,46 @@ export async function recordHit(
     site.id_mode === "persistent" && payload.v
       ? payload.v
       : await visitorBucket(env, site.token, ip, day);
+  // New/returning: persistent ids are compared against all prior hits of this
+  // visitor; daily ids rotate, so those visits are always "new" by definition.
+  let newVisitor = 1;
+  if (site.id_mode === "persistent") {
+    const prior = await env.DB
+      .prepare("SELECT 1 AS x FROM hits WHERE site_id = ? AND vid = ? LIMIT 1")
+      .bind(site.id, vid)
+      .first();
+    newVisitor = prior ? 0 : 1;
+  }
+  const ref = classifyReferrer(payload.r ?? null);
+  const utm = parseUtm(payload.q ?? null);
+  const { device, browser, os } = parseUA(ua);
   await env.DB.prepare(
-    "INSERT INTO hits (site_id, day, ts, path, ref, country, vid) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    `INSERT INTO hits (site_id, day, ts, path, ref, country, vid,
+       ref_class, ref_source, search_term, ref_path, device, browser, os,
+       city, region, utm_source, utm_medium, utm_campaign, new_visitor)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       site.id,
       day,
       now,
       payload.p,
-      payload.r ? refHost(payload.r) : null,
+      ref.refHost,
       country,
       vid,
+      ref.refClass,
+      ref.refSource,
+      ref.searchTerm,
+      ref.refPath,
+      device,
+      browser,
+      os,
+      city,
+      region,
+      utm.source,
+      utm.medium,
+      utm.campaign,
+      newVisitor,
     )
     .run();
   return { ok: true, counted: true };

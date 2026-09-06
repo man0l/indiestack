@@ -11,7 +11,9 @@
     }
   },
   "vars": {
-    "APP_NAME": "indiestack"
+    "APP_NAME": "indiestack",
+    // AI-bots self-tracking: analytics site token for this worker's own pages
+    "INDIESTACK_SITE_ID": "92a30dec2a0e4fdda2651c9a6cc1ba47"
   },
   // One cron for the account. Jobs are rows, not extra triggers.
   "triggers": {

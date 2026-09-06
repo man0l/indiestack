@@ -66,9 +66,13 @@ export const analytics: Plugin = {
       if (method !== "POST") return new Response(null, { status: 204 });
       const payload = parseHit(await readBody(request));
       if (!payload) return new Response(null, { status: 204 });
-      const country = (request as Request & { cf?: { country?: string } }).cf?.country ?? null;
+      const cf = (request as Request & { cf?: { country?: string; city?: string; region?: string } }).cf;
+      const country = cf?.country ?? null;
+      const city = cf?.city ?? null;
+      const region = cf?.region ?? null;
       const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
-      await recordHit(env, payload as HitPayload, country, ip).catch(() => {});
+      const ua = request.headers.get("user-agent") ?? "";
+      await recordHit(env, payload as HitPayload, country, ip, ua, city, region).catch(() => {});
       return new Response(null, { status: 204 });
     }
 

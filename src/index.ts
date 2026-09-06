@@ -16,6 +16,8 @@ import { getSetting, setSetting } from "./kernel/db";
 import { redirect } from "./kernel/http";
 import { collect, dispatch, firstKicker, sumHealth } from "./kernel/plugin";
 import { runTick } from "./kernel/tick";
+import { ingestAIBotEvent, type AIBotEventIn } from "./analytics/crawlers";
+import { trackAIBotResponse } from "../packages/indiestack-ai-bots/src/index";
 import { deployOverview } from "./integrations";
 import { listJobs } from "./heartbeat/plugin";
 import { listLogSources } from "./logs/index";
@@ -30,8 +32,21 @@ import { parseHttpUrl } from "./kernel/util";
 import { adminShell, ago, html, loginPage, overallOf, revealPage, settingsCard, statusPage } from "./ui";
 
 export default {
-  async fetch(request, env) {
-    return handle(request, env);
+  async fetch(request, env, execCtx) {
+    const response = await handle(request, env, execCtx);
+    // Dogfood the SDK: track AI bots fetching this worker's own pages.
+    // The local onEvent sink writes straight to D1 — no HTTP hop.
+    if (env.INDIESTACK_SITE_ID) {
+      try {
+        await trackAIBotResponse(request, response, execCtx, {
+          websiteId: env.INDIESTACK_SITE_ID,
+          onEvent: (event) => ingestAIBotEvent(env, event),
+        });
+      } catch (err) {
+        console.error("[ai-bots] self-track failed", String(err));
+      }
+    }
+    return response;
   },
   async scheduled(_controller, env) {
     await runTick(env).catch((err) => {
@@ -66,7 +81,7 @@ async function lastVercelSync(env: Env): Promise<{ at: number; synced: number; e
   }
 }
 
-async function handle(request: Request, env: Env): Promise<Response> {
+async function handle(request: Request, env: Env, _execCtx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const ctx = {
     request,
@@ -83,6 +98,19 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
   const routed = await dispatch(PLUGINS, "route", ctx);
   if (routed) return routed;
+
+  // @indiestack/ai-bots ingest: the tracked project's SDK ships the event,
+  // this worker classifies (agent/category) and verifies (published IP ranges).
+  if (ctx.path === "/api/ai-bots" && ctx.method === "POST") {
+    let body: AIBotEventIn | null;
+    try {
+      body = (await request.json().catch(() => null)) as AIBotEventIn | null;
+    } catch {
+      body = null;
+    }
+    const ok = body ? await ingestAIBotEvent(env, body).catch(() => false) : false;
+    return new Response(null, { status: ok ? 204 : 202 });
+  }
 
   if (ctx.path.startsWith("/_app/") && ctx.method === "GET") {
     const name = ctx.path.slice(6);
@@ -292,20 +320,72 @@ async function handle(request: Request, env: Env): Promise<Response> {
         url: m.url,
       });
     }
+    const sinceDay = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const sinceTs = Date.now() - 7 * 86400000;
+    const crawlerRows = await env.DB.prepare(
+      `SELECT crawler, vendor, category, MAX(verified) AS verified, COUNT(*) AS fetches, MAX(ts) AS last_ts
+       FROM crawler_fetches WHERE ts >= ? GROUP BY crawler ORDER BY fetches DESC LIMIT 10`,
+    )
+      .bind(sinceTs)
+      .all<{ crawler: string; vendor: string | null; category: string | null; verified: number; fetches: number; last_ts: number }>();
     return Response.json({
+      crawlers: (crawlerRows.results ?? []).map((r) => ({
+        crawler: r.crawler,
+        vendor: r.vendor,
+        category: r.category,
+        verified: Boolean(r.verified),
+        fetches: Number(r.fetches),
+        lastTs: r.last_ts,
+      })),
       sites: await Promise.all(
         sites.map(async (site) => {
           const s = await siteStats(env, site, 7);
+          const [aiRows, keywordRows, deviceRows, newReturn] = await Promise.all([
+            env.DB.prepare(
+              `SELECT ref_source AS source, COUNT(*) AS views FROM hits
+               WHERE site_id = ? AND day >= ? AND ref_class = 'ai' GROUP BY ref_source ORDER BY views DESC LIMIT 8`,
+            )
+              .bind(site.id, sinceDay)
+              .all<{ source: string; views: number }>(),
+            env.DB.prepare(
+              `SELECT search_term AS term, COUNT(*) AS views FROM hits
+               WHERE site_id = ? AND day >= ? AND ref_class = 'search' AND search_term IS NOT NULL
+               GROUP BY search_term ORDER BY views DESC LIMIT 8`,
+            )
+              .bind(site.id, sinceDay)
+              .all<{ term: string; views: number }>(),
+            env.DB.prepare(
+              `SELECT device, COUNT(*) AS views FROM hits
+               WHERE site_id = ? AND day >= ? GROUP BY device ORDER BY views DESC LIMIT 4`,
+            )
+              .bind(site.id, sinceDay)
+              .all<{ device: string; views: number }>(),
+            env.DB.prepare(
+              `SELECT new_visitor, COUNT(DISTINCT vid) AS n FROM hits
+               WHERE site_id = ? AND day >= ? GROUP BY new_visitor`,
+            )
+              .bind(site.id, sinceDay)
+              .all<{ new_visitor: number; n: number }>(),
+          ]);
+          const nr = { new: 0, returning: 0 };
+          for (const r of newReturn.results ?? []) {
+            if (Number(r.new_visitor) === 1) nr.new = Number(r.n);
+            else nr.returning = Number(r.n);
+          }
           return {
             id: site.id,
             name: site.name,
             enabled: site.enabled,
             idMode: site.id_mode,
             totals: s.totals,
+            newReturn: nr,
             days: s.days,
             topPaths: s.topPaths,
             topRefs: s.topRefs,
             topCountries: s.topCountries,
+            aiRefs: aiRows.results ?? [],
+            keywords: keywordRows.results ?? [],
+            devices: deviceRows.results ?? [],
             annotations: annotationsBySite.get(site.id) ?? [],
             share: shareBySite.get(site.id) ?? { on: false, url: null },
             snippet: `<script defer src="${origin}/a.js" data-site="${site.token}"><\/script>`,

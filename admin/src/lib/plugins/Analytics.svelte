@@ -35,14 +35,29 @@
     enabled: number;
     idMode: 'daily' | 'persistent';
     totals: { views: number; uniques: number };
+    newReturn: { new: number; returning: number };
     days: Array<{ day: string; views: number; uniques: number }>;
     topPaths: Array<{ path: string; views: number }>;
     topRefs: Array<{ ref: string; views: number }>;
     topCountries: Array<{ country: string; views: number }>;
+    aiRefs: Array<{ source: string; views: number }>;
+    keywords: Array<{ term: string; views: number }>;
+    devices: Array<{ device: string; views: number }>;
     annotations: Annotation[];
     share: { on: boolean; url: string | null };
     snippet: string;
   };
+
+  type Crawler = {
+    crawler: string;
+    vendor: string | null;
+    category: string | null;
+    verified: boolean;
+    fetches: number;
+    lastTs: number;
+  };
+
+  let crawlers: Crawler[] = $state([]);
 
   let sites: SiteStats[] = $state([]);
   let loading = $state(true);
@@ -64,8 +79,11 @@
     loading = true;
     try {
       const r = await fetch('/api/analytics');
-      if (r.ok) sites = (await r.json()).sites ?? [];
-      else err = 'failed to load analytics';
+      if (r.ok) {
+        const j = await r.json();
+        sites = j.sites ?? [];
+        crawlers = j.crawlers ?? [];
+      } else err = 'failed to load analytics';
     } catch (e) {
       err = String(e);
     } finally {
@@ -142,6 +160,25 @@
     <Card.Description>Cookie-free pageviews. One D1 write per view, capped 2,000 views/site/day. 30-day retention.</Card.Description>
   </Card.Header>
   <Card.Content>
+    {#if crawlers.length}
+      <div class="mb-4 rounded-xl border border-border bg-card p-3">
+        <div class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">ai &amp; search crawlers · 7 days</div>
+        <div class="flex flex-wrap gap-2">
+          {#each crawlers as c (c.crawler)}
+            <span
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs"
+              title={c.verified ? "fetch IP matched the vendor\u2019s published ranges" : "identified by user-agent only"}
+            >
+              <span class={c.verified ? 'text-success' : 'text-muted-foreground'}>{c.crawler}</span>
+              {#if c.category}<span class="text-muted-foreground">[{c.category}]</span>{/if}
+              <span class="text-muted-foreground">·</span>
+              <span class="tabular-nums">{c.fetches}</span>
+              {#if c.verified}<span class="text-success">✓</span>{/if}
+            </span>
+          {/each}
+        </div>
+      </div>
+    {/if}
     {#if loading}
       <div class="flex flex-col gap-2">
         <Skeleton class="h-32 rounded-lg" />
@@ -186,7 +223,10 @@
                 />
               </span>
             </div>
-            <p class="mb-2 text-xs text-muted-foreground">7 days: <b>{s.totals.views}</b> views · <b>{s.totals.uniques}</b> uniques</p>
+            <p class="mb-2 text-xs text-muted-foreground">
+              7 days: <b>{s.totals.views}</b> views · <b>{s.totals.uniques}</b> uniques
+              {#if s.idMode === 'persistent'}· <b>{s.newReturn.new}</b> new · <b>{s.newReturn.returning}</b> returning{/if}
+            </p>
             <SiteChart days={s.days} annotations={s.annotations} />
             <div class="grid gap-3 sm:grid-cols-3">
               <div>
@@ -205,6 +245,33 @@
                 <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">countries</div>
                 {#if s.topCountries.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
                   {#each s.topCountries as c (c.country)}<div class="truncate text-xs text-muted-foreground">{c.country} · {c.views}</div>{/each}
+                {/if}
+              </div>
+            </div>
+            <div class="mt-2 truncate font-mono text-xs text-muted-foreground">{s.snippet}</div>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">ai referrals</div>
+                {#if s.aiRefs.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
+                  {#each s.aiRefs as a (a.source)}<div class="truncate text-xs text-muted-foreground">{a.source} · {a.views}</div>{/each}
+                {/if}
+              </div>
+              <div>
+                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">search keywords</div>
+                {#if s.keywords.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
+                  {#each s.keywords as k (k.term)}<div class="truncate text-xs text-muted-foreground" title={k.term}>{k.term} · {k.views}</div>{/each}
+                {/if}
+              </div>
+              <div>
+                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">devices</div>
+                {#if s.devices.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
+                  {#each s.devices as d (d.device)}<div class="truncate text-xs text-muted-foreground">{d.device} · {d.views}</div>{/each}
+                {/if}
+              </div>
+              <div>
+                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">top referrers</div>
+                {#if s.topRefs.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
+                  {#each s.topRefs as r (r.ref)}<div class="truncate text-xs text-muted-foreground">{r.ref} · {r.views}</div>{/each}
                 {/if}
               </div>
             </div>

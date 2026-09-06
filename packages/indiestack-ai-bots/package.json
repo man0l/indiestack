@@ -1,0 +1,41 @@
+{
+  "name": "indiestack-ai-bots",
+  "version": "0.1.0",
+  "description": "Server-side AI bot tracking for indiestack analytics. Detects AI assistants, AI search systems and training crawlers requesting pages on your site — from Next.js proxy, Cloudflare Workers/Pages, Express, Hono or any web-standard handler.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "analytics",
+    "ai-bots",
+    "gptbot",
+    "claudebot",
+    "perplexity",
+    "cloudflare",
+    "middleware"
+  ],
+  "author": "man0l",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/man0l/indiestack.git",
+    "directory": "packages/indiestack-ai-bots"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
