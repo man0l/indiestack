@@ -31,7 +31,7 @@ export function adminAnalytics(stats: SiteStats[], origin: string): string {
         <p class="sub" style="margin:0 0 8px">7 days: <b>${s.totals.views}</b> views · <b>${s.totals.uniques}</b> uniques · snippet:</p>
         <div class="url" style="margin-bottom:10px">&lt;script defer src="${esc(origin)}/a.js" data-site="${esc(s.site.token)}"&gt;&lt;/script&gt;</div>
         <div style="margin-bottom:10px">${miniBars(s.days)}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
           <div><b>top paths</b>${topList(s.topPaths, "path")}</div>
           <div><b>top referrers</b>${topList(s.topRefs, "ref")}</div>
           <div><b>countries</b>${topList(s.topCountries, "country")}</div>

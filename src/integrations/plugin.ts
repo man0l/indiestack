@@ -14,6 +14,7 @@ import {
   connectVercel,
   resolveVercelProject,
   scanDeploys,
+  syncVercelLogs,
 } from "./index";
 import { adminDeploys, statusDeploys } from "./ui";
 
@@ -27,7 +28,7 @@ async function listTargets(db: D1Database): Promise<DeployTarget[]> {
 export const integrations: Plugin = {
   id: "integrations",
   adminNav: { group: "monitoring", label: "deploys" },
-  adminFooter: "Deploys alert on the first failed production deploy. Tokens live in your settings, never leave the Worker.",
+  adminFooter: "GitHub targets track main-branch commits; Vercel targets track production deploys. A target alerts when its repo or project stops resolving. Tokens live in your settings, never leave the Worker.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM deploy_targets").first<{
       n: number;
@@ -36,17 +37,20 @@ export const integrations: Plugin = {
     return `${n.n}/${MAX_DEPLOY_TARGETS} deploys`;
   },
   async adminSection(ctx: SectionCtx) {
-    const [targets, githubUser, vercelUser] = await Promise.all([
+    const [targets, githubUser, vercelUser, cloudflareUser] = await Promise.all([
       listTargets(ctx.env.DB),
       ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'github_user'")
         .first<{ value: string }>(),
       ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'vercel_user'")
+        .first<{ value: string }>(),
+      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'cloudflare_user'")
         .first<{ value: string }>(),
     ]);
     return adminDeploys(
       targets,
       { connected: githubUser?.value != null, who: githubUser?.value ?? null },
       { connected: vercelUser?.value != null, who: vercelUser?.value ?? null },
+      { connected: cloudflareUser?.value != null, who: cloudflareUser?.value ?? null },
     );
   },
   async occupied(ctx: SectionCtx) {
@@ -79,7 +83,10 @@ export const integrations: Plugin = {
   },
   async tick(env, now) {
     const r = await scanDeploys(env, now);
-    return { deploys: r.scanned, alerts: r.alerts };
+    const synced = await syncVercelLogs(env, now).catch(() => 0);
+    const { syncCloudflareLogs } = await import("../cloudflare/index");
+    const cfSynced = await syncCloudflareLogs(env, now).catch(() => 0);
+    return { deploys: r.scanned, alerts: r.alerts, vercel_logs: synced, cf_logs: cfSynced };
   },
   async admin(ctx: RouteCtx) {
     const { path, method, env, request } = ctx;
@@ -139,6 +146,9 @@ export const integrations: Plugin = {
           nag_min: 0,
           last_nag_at: null,
           created_at: Date.now(),
+          site_id: null,
+          last_commits: null,
+          account: null,
         })),
       );
       const skipped = repos.length - toAdd.length;
@@ -147,22 +157,107 @@ export const integrations: Plugin = {
       );
     }
 
-    const check = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/check$/);
-    if (check && method === "POST") {
+        const cfbulk = path === "/admin/deploys/targets/cfbulk" && method === "POST";
+    if (cfbulk) {
+      const body = (await request.json().catch(() => null)) as
+        | { account?: unknown; scripts?: unknown; interval_min?: unknown }
+        | null;
+      const account = typeof body?.account === "string" ? body.account.trim() : "";
+      const names = [
+        ...new Set(
+          (Array.isArray(body?.scripts) ? body.scripts : [])
+            .filter((s): s is string => typeof s === "string")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (!account) return jsonErr("cloudflare account required");
+      if (!names.length) return jsonErr("no workers selected");
+      const token = await getSetting(env.DB, "cloudflare_token");
+      if (!token) return jsonErr("connect cloudflare first");
+      const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM deploy_targets").first<{
+        n: number;
+      }>();
+      const existing = new Set(
+        (await listDeployTargets(env))
+          .filter((t) => t.provider === "cloudflare")
+          .map((t) => `${t.account}::${t.project}`),
+      );
+      const fresh = names.filter((n) => !existing.has(`${account}::${n}`));
+      if (!fresh.length) return jsonErr("already watching all selected workers");
+      const room = MAX_DEPLOY_TARGETS - (count?.n ?? 0);
+      if (room <= 0) return jsonErr("max 10 deploy targets");
+      const toAdd = fresh.slice(0, Math.min(room, fresh.length));
+      const interval = clamp(Number(body?.interval_min ?? 5), 5, 60);
+      await insertDeployTargetsBulk(
+        env,
+        toAdd.map((name) => ({
+          id: crypto.randomUUID(),
+          provider: "cloudflare" as const,
+          name: name.slice(0, 40),
+          repo: null,
+          project: name,
+          team: null,
+          account,
+          interval_min: interval,
+          enabled: 1,
+          status: "unknown" as const,
+          last_check_at: null,
+          last_detail: null,
+          last_error: null,
+          consecutive: 0,
+          mute_until: null,
+          nag_min: 0,
+          last_nag_at: null,
+          created_at: Date.now(),
+          site_id: null,
+          last_commits: null,
+        })),
+      );
+      const skipped = names.length - toAdd.length;
+      return jsonOk(
+        `watching ${toAdd.length} worker(s)${skipped ? ` · ${skipped} skipped (already watched or no room)` : ""}`,
+      );
+    }
+
+    const check = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/check$/);    if (check && method === "POST") {
       const t = await checkTargetNow(env, check[1]);
       if (!t && wantsJson) return Response.json({ ok: false, error: "not found" }, { status: 404 });
       if (wantsJson) return Response.json({ ok: true, target: t });
       return redirect("/admin?msg=checked");
     }
 
-    const connect = path.match(/^\/admin\/deploys\/(github|vercel)\/connect$/);
+    const connect = path.match(/^\/admin\/deploys\/(github|vercel|cloudflare)\/connect$/);
     if (connect && method === "POST") {
       const form = await request.formData();
       const token = String(form.get("token") ?? "").trim();
       if (!token) return redirect("/admin?msg=token%20required");
       const provider = connect[1];
       try {
-        const who = provider === "github" ? await connectGithub(token) : await connectVercel(token);
+        const { connectCloudflare, listAccounts } = provider === "cloudflare"
+          ? await import("../cloudflare/index")
+          : { connectCloudflare: null, listAccounts: null };
+        const who =
+          provider === "github"
+            ? await connectGithub(token)
+            : provider === "vercel"
+              ? await connectVercel(token)
+              : await connectCloudflare!(token);
+        const extra: Array<Promise<unknown>> = [];
+        if (provider === "cloudflare" && listAccounts) {
+          // Remember the first account so the worker picker/logs work with no typing.
+          extra.push(
+            listAccounts(token)
+              .then((accts) =>
+                accts[0]
+                  ? env.DB.prepare(
+                      "INSERT INTO settings (key, value) VALUES ('cf_account_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    ).bind(accts[0].id).run()
+                  : null,
+              )
+              .catch(() => null),
+          );
+        }
         await env.DB.batch([
           env.DB.prepare(
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -171,13 +266,14 @@ export const integrations: Plugin = {
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
           ).bind(`${provider}_user`, who),
         ]);
+        await Promise.all(extra);
         return jsonOk(`connected as ${who}`);
       } catch (err) {
         return jsonErr(`token rejected: ${String(err).slice(0, 80)}`);
       }
     }
 
-    const disconnect = path.match(/^\/admin\/deploys\/(github|vercel)\/disconnect$/);
+    const disconnect = path.match(/^\/admin\/deploys\/(github|vercel|cloudflare)\/disconnect$/);
     if (disconnect && method === "POST") {
       const p = disconnect[1];
       await env.DB.batch([
@@ -189,12 +285,18 @@ export const integrations: Plugin = {
 
     if (path === "/admin/deploys/targets" && method === "POST") {
       const form = await request.formData();
-      const provider = String(form.get("provider") ?? "") === "vercel" ? "vercel" : "github";
+      const rawProvider = String(form.get("provider") ?? "");
+      const provider =
+        rawProvider === "vercel" ? "vercel" : rawProvider === "cloudflare" ? "cloudflare" : "github";
       const repo = String(form.get("repo") ?? "").trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/, "");
       const projectRaw = String(form.get("project") ?? "").trim();
       const team = String(form.get("team") ?? "").trim();
+      const account = String(form.get("account") ?? "").trim();
       if (provider === "github" ? !repo : !projectRaw) {
         return jsonErr("repo or project required");
+      }
+      if (provider === "cloudflare" && !account) {
+        return jsonErr("cloudflare account id required");
       }
       const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM deploy_targets").first<{
         n: number;
@@ -203,7 +305,7 @@ export const integrations: Plugin = {
         return jsonErr("max 10 deploy targets");
       }
       // Vercel: accept a project slug or id, store the canonical id so the
-      // deployments query always matches.
+      // deployments query always matches. Cloudflare: the worker script name is the key.
       let project: string | null = null;
       let resolvedName = "";
       if (provider === "vercel") {
@@ -215,6 +317,10 @@ export const integrations: Plugin = {
         }
         project = resolved.id;
         resolvedName = resolved.name;
+      } else if (provider === "cloudflare") {
+        const token = await getSetting(env.DB, "cloudflare_token");
+        if (!token) return jsonErr("connect cloudflare first");
+        project = projectRaw;
       }
       const name =
         String(form.get("name") ?? "").trim().slice(0, 40) ||
@@ -226,6 +332,7 @@ export const integrations: Plugin = {
         repo: provider === "github" ? repo : null,
         project,
         team: provider === "vercel" ? team || null : null,
+        account: provider === "cloudflare" ? account : null,
         interval_min: clamp(Number(form.get("interval_min") ?? 5), 5, 60),
         enabled: 1,
         status: "unknown",
@@ -237,6 +344,8 @@ export const integrations: Plugin = {
         nag_min: clamp(Number(form.get("nag_min") ?? 0), 0, 1440),
         last_nag_at: null,
         created_at: Date.now(),
+        site_id: null,
+        last_commits: null,
       };
       await insertDeployTarget(env, target);
       return jsonOk(`added ${target.name} — first check done`);
@@ -246,6 +355,63 @@ export const integrations: Plugin = {
     if (tog && method === "POST") {
       await toggleEnabled(env.DB, "deploy_targets", tog[1]);
       return jsonOk("toggled");
+    }
+
+    if (path === "/admin/cloudflare/workers" && method === "POST") {
+      const { setCfWorkers } = await import("../cloudflare/index");
+      const body = (await request.json().catch(() => null)) as { workers?: unknown } | null;
+      const list = Array.isArray(body?.workers) ? body.workers : [];
+      const saved = await setCfWorkers(
+        env,
+        list.filter((w): w is string => typeof w === "string"),
+      );
+      return jsonOk(saved.length ? `watching logs for ${saved.length} worker(s)` : "worker logs off");
+    }
+
+    if (path === "/admin/cloudflare/mapping" && method === "POST") {
+      const { setCfMapping } = await import("../cloudflare/index");
+      const body = (await request.json().catch(() => null)) as { mappings?: unknown } | null;
+      const raw = body?.mappings && typeof body.mappings === "object" ? body.mappings : {};
+      const saved = await setCfMapping(
+        env,
+        raw as Record<string, string | { source: string; quiet: boolean }>,
+      );
+      const n = Object.keys(saved).length;
+      return jsonOk(n ? `${n} worker(s) mapped to log sources` : "mapping cleared");
+    }
+
+    if (path === "/admin/vercel/mapping" && method === "POST") {
+      const { setVercelMapping } = await import("./index");
+      const body = (await request.json().catch(() => null)) as { mappings?: unknown } | null;
+      const raw = body?.mappings && typeof body.mappings === "object" ? body.mappings : {};
+      const saved = await setVercelMapping(env, raw as Record<string, string>);
+      const n = Object.keys(saved).length;
+      return jsonOk(n ? `${n} project(s) mapped to log sources` : "mapping cleared");
+    }
+
+    const site = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/site$/);
+    if (site && method === "POST") {
+      let siteId: string | null = null;
+      const ct = request.headers.get("content-type") ?? "";
+      if (ct.includes("application/json")) {
+        const body = (await request.json().catch(() => null)) as { site_id?: unknown } | null;
+        const v = typeof body?.site_id === "string" ? body.site_id.trim() : "";
+        siteId = v || null;
+      } else {
+        const form = await request.formData();
+        const v = String(form.get("site_id") ?? "").trim();
+        siteId = v || null;
+      }
+      if (siteId) {
+        const ok = await env.DB.prepare("SELECT id FROM analytics_sites WHERE id = ?")
+          .bind(siteId)
+          .first<{ id: string }>();
+        if (!ok) return jsonErr("unknown analytics site");
+      }
+      await env.DB.prepare("UPDATE deploy_targets SET site_id = ? WHERE id = ?")
+        .bind(siteId, site[1])
+        .run();
+      return jsonOk(siteId ? "linked to analytics site" : "unlinked");
     }
 
     const del = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/delete$/);

@@ -1,10 +1,14 @@
 import { esc, ghostLink } from "../ui";
 import type { LogSource } from "./index";
 
-export function adminLogs(sources: LogSource[], origin: string): string {
+export function adminLogs(
+  sources: LogSource[],
+  origin: string,
+  cfMapping: Array<{ worker: string; source: string }> = [],
+): string {
   const logList =
     sources.length === 0
-      ? `<p class="sub">No log sources. POST errors here — not access logs. Kept 24h in R2.</p>`
+      ? `<p class="sub">No log sources. POST errors here — not access logs. Kept 24h in D1.</p>`
       : sources
           .map((s) => {
             const url = `${origin}/log/${s.token}`;
@@ -29,6 +33,7 @@ export function adminLogs(sources: LogSource[], origin: string): string {
 
   return `<h2>logs</h2>
     <p class="sub" style="margin:8px 0 0"><a href="/admin/logs">log manager</a> — filter, search, expand, tail.</p>
+    ${cfMapping.length ? `<p class="sub" style="margin:8px 0 0">cloudflare workers → ${cfMapping.map((m) => `${esc(m.worker)} → ${esc(m.source)}`).join(" · ")}</p>` : ""}
     <div class="list">${logList}</div>
     <form class="card" method="post" action="/admin/logs">
       <label>name

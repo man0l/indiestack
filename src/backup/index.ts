@@ -237,11 +237,11 @@ export async function restoreBackup(env: Env, backup: Backup): Promise<RestoreSt
         `INSERT OR REPLACE INTO deploy_targets (
            id, provider, name, repo, project, team, interval_min, enabled, status,
            last_check_at, last_detail, last_error, consecutive, mute_until, nag_min,
-           last_nag_at, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           last_nag_at, created_at, site_id, last_commits, account
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         id,
-        str(t.provider, "github") === "vercel" ? "vercel" : "github",
+        str(t.provider, "github") === "vercel" ? "vercel" : str(t.provider, "github") === "cloudflare" ? "cloudflare" : "github",
         str(t.name, id).slice(0, 40),
         nulstr(t.repo),
         nulstr(t.project),
@@ -257,6 +257,9 @@ export async function restoreBackup(env: Env, backup: Backup): Promise<RestoreSt
         int(t.nag_min, 0),
         nulint(t.last_nag_at),
         int(t.created_at, Date.now()),
+        nulstr(t.site_id),
+        nulstr(t.last_commits),
+        nulstr(t.account),
       ),
     );
   }

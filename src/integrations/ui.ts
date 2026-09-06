@@ -1,24 +1,37 @@
 import { esc, liveStatus } from "../ui";
-import type { DeployTarget } from "./index";
+import { parseCommits, type DeployTarget } from "./index";
 
 export function adminDeploys(
   targets: DeployTarget[],
   github: { connected: boolean; who: string | null },
   vercel: { connected: boolean; who: string | null },
+  cloudflare: { connected: boolean; who: string | null },
 ): string {
   const list =
     targets.length === 0
-      ? `<p class="sub">Nothing connected. Connect GitHub or Vercel, then watch its production deployments.</p>`
+      ? `<p class="sub">Nothing connected. Connect GitHub or Vercel, then track main-branch commits or production deploys.</p>`
       : targets
           .map((t) => {
-            const what = t.provider === "github" ? t.repo : `${t.project}${t.team ? ` @ ${t.team}` : ""}`;
+            const what =
+              t.provider === "github"
+                ? t.repo
+                : t.provider === "cloudflare"
+                  ? `${t.project} @ ${t.account ?? "?"}`
+                  : `${t.project}${t.team ? ` @ ${t.team}` : ""}`;
             const dot = liveStatus(t.enabled, t.status, t.mute_until);
             const extra = [t.last_detail ?? "", t.last_error ?? ""].filter(Boolean).join(" · ");
+            const commits = parseCommits(t.last_commits)
+              .map(
+                (c) =>
+                  `<div class="url">${esc(c.sha)}${c.merge ? " · merge" : ""} · ${esc(c.msg)}</div>`,
+              )
+              .join("");
             return `<div class="row">
               <div class="dot ${esc(dot)}"></div>
               <div>
                 <div class="name">${esc(t.name)} · ${esc(t.provider)} · every ${t.interval_min}m${t.enabled ? "" : " · paused"}</div>
                 <div class="url">${esc(what ?? "")}${extra ? ` · ${esc(extra)}` : ""}</div>
+                ${commits}
               </div>
               <div class="actions">
                 <form method="post" action="/admin/deploys/targets/${esc(t.id)}/toggle">
@@ -56,10 +69,14 @@ export function adminDeploys(
   const githubTokenUrl =
     "https://github.com/settings/personal-access-tokens/new" +
     "?name=IndieStack%20deploys" +
-    "&description=Read-only%20deployment%20status%20for%20IndieStack" +
-    "&permissions%5Bdeployments%5D=read" +
+    "&description=Read-only%20commit%20tracking%20for%20IndieStack" +
+    "&permissions%5Bcontents%5D=read" +
     "&expiration=none";
   const vercelTokenUrl = "https://vercel.com/account/tokens";
+  const cloudflareTokenUrl =
+    "https://dash.cloudflare.com/profile/api-tokens" +
+    "?permissionGroupKeys=%5B%7B%22key%22%3A%22page%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22workers_observability%22%2C%22type%22%3A%22edit%22%7D%5D" +
+    "&accountId=%2A&zoneId=all&name=IndieStack%20deploys";
 
   const addGithub = github.connected
     ? `<form class="card" method="post" action="/admin/deploys/targets">
@@ -107,7 +124,7 @@ export function adminDeploys(
       githubTokenUrl,
       "create a pre-filled read-only token",
       github,
-      "The link pre-selects <b>Deployments: read-only</b> and <b>no expiration</b> — nothing expires, nothing else is granted. Prefer 30/90 days? Change Expiration in the form. Public repos work without any token (just slower); disconnect here revokes instantly.",
+      "The link pre-selects <b>Contents: read-only</b> and <b>no expiration</b> — nothing expires, nothing else is granted. Prefer 30/90 days? Change Expiration in the form. Public repos work without any token (just slower); disconnect here revokes instantly.",
     )}
     ${addGithub}
     ${connect(
@@ -118,7 +135,15 @@ export function adminDeploys(
       vercel,
       "Vercel has no prefill: in the modal pick Scope → your account or team, and Expiration (no-expiration is fine — revoke here anytime). IndieStack only calls read endpoints.",
     )}
-    ${addVercel}`;
+    ${addVercel}
+    ${connect(
+      "cloudflare",
+      "Cloudflare",
+      cloudflareTokenUrl,
+      "create a pre-filled token",
+      cloudflare,
+      "The link pre-selects <b>Workers Scripts: read-only</b> plus <b>Workers Observability</b> (log queries need the write grant) on all accounts. Watch worker deployments and logs from the admin UI.",
+    )}`;
 }
 
 export function statusDeploys(targets: DeployTarget[]): string {

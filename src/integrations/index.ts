@@ -1,17 +1,19 @@
 import { notifyAll } from "../kernel/alert";
-import { getSetting } from "../kernel/db";
+import { getSetting, setSetting } from "../kernel/db";
 import { trunc } from "../kernel/util";
+import { putLogEvents } from "../logs/index";
 
 export const MAX_DEPLOY_TARGETS = 10;
 const BATCH = 5;
 
 export type DeployTarget = {
   id: string;
-  provider: "github" | "vercel";
+  provider: "github" | "vercel" | "cloudflare";
   name: string;
   repo: string | null;
   project: string | null;
   team: string | null;
+  account: string | null;
   interval_min: number;
   enabled: number;
   status: "up" | "down" | "unknown";
@@ -23,13 +25,46 @@ export type DeployTarget = {
   nag_min: number;
   last_nag_at: number | null;
   created_at: number;
+  site_id: string | null;
+  last_commits: string | null;
 };
+
+export type CommitInfo = {
+  sha: string;
+  msg: string;
+  ts: number;
+  url: string | null;
+  merge: boolean;
+};
+
+export function parseCommits(raw: string | null): CommitInfo[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === "object")
+      .slice(0, 3)
+      .map((c) => ({
+        sha: String(c.sha ?? "").slice(0, 7),
+        msg: String(c.msg ?? "").slice(0, 120),
+        ts: Number(c.ts) || 0,
+        url: typeof c.url === "string" ? c.url : null,
+        merge: c.merge === true,
+      }))
+      .filter((c) => c.sha);
+  } catch {
+    return [];
+  }
+}
 
 export type DeployResult = {
   /** true/false = deploy state · null = probe/infra error, keep previous status */
   ok: boolean | null;
   detail: string | null;
   error: string | null;
+  /** recent commits (github) — empty for vercel / failures */
+  commits?: CommitInfo[];
 };
 
 const UA = "indiestack-deploys/0.1";
@@ -70,7 +105,140 @@ export async function connectVercel(token: string): Promise<string> {
   return who;
 }
 
-/** Resolve a Vercel project id or slug to its canonical id. Returns null if unknown. */
+/** Vercel projects visible to the token (for the picker). */
+export async function listVercelProjects(
+  token: string,
+  team: string | null,
+): Promise<Array<{ id: string; name: string }>> {
+  const qs = new URLSearchParams({ limit: "100" });
+  if (team) qs.set("teamId", team);
+  const res = await fetch(`https://api.vercel.com/v9/projects?${qs}`, { headers: jsonHeaders(token) });
+  if (!res.ok) throw new Error(await readError(res));
+  const json = (await res.json()) as { projects?: Array<{ id?: string; name?: string }> };
+  return (json.projects ?? [])
+    .filter((p) => p.id && p.name)
+    .map((p) => ({ id: p.id as string, name: p.name as string }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Vercel teams visible to the token (for scoping project queries). */
+export async function listVercelTeams(token: string): Promise<Array<{ id: string; slug: string }>> {
+  const res = await fetch("https://api.vercel.com/v2/teams", { headers: jsonHeaders(token) });
+  if (!res.ok) throw new Error(await readError(res));
+  const json = (await res.json()) as { teams?: Array<{ id?: string; slug?: string; name?: string }> };
+  return (json.teams ?? [])
+    .filter((t) => t.id)
+    .map((t) => ({ id: t.id as string, slug: t.slug ?? t.name ?? (t.id as string) }))
+    .sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+/** Vercel project id -> log source id. */
+export type VercelLogMap = Record<string, { source: string; team: string | null }>;
+
+export async function getVercelMapping(env: Env): Promise<VercelLogMap> {
+  const raw = await getSetting(env.DB, "vercel_log_sources");
+  if (!raw) return {};
+  try {
+    const o = JSON.parse(raw) as unknown;
+    if (!o || typeof o !== "object" || Array.isArray(o)) return {};
+    const out: VercelLogMap = {};
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+      if (typeof k !== "string" || !k) continue;
+      if (typeof v === "string" && v) out[k.slice(0, 80)] = { source: v, team: null };
+      else if (v && typeof v === "object" && typeof (v as { source?: unknown }).source === "string") {
+        const vv = v as { source: string; team?: unknown };
+        if (vv.source) out[k.slice(0, 80)] = { source: vv.source, team: typeof vv.team === "string" ? vv.team : null };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function setVercelMapping(env: Env, mapping: Record<string, unknown>): Promise<VercelLogMap> {
+  const valid = await env.DB.prepare("SELECT id FROM log_sources").all<{ id: string }>();
+  const ids = new Set((valid.results ?? []).map((r) => r.id));
+  const clean: VercelLogMap = {};
+  for (const [k, v] of Object.entries(mapping).slice(0, 20)) {
+    if (typeof k !== "string" || !k) continue;
+    const source = typeof v === "string" ? v : (v as { source?: unknown })?.source;
+    const team = typeof v === "object" && v !== null ? (v as { team?: unknown }).team : null;
+    if (typeof source === "string" && ids.has(source)) {
+      clean[k.slice(0, 80)] = { source, team: typeof team === "string" && team ? team : null };
+    }
+  }
+  await setSetting(env.DB, "vercel_log_sources", JSON.stringify(clean));
+  return clean;
+}
+export type VercelLogEvent = { ts: number; level: string; message: string; project: string };
+
+/**
+ * Vercel events carry no explicit level — build lines arrive as typed streams
+ * (stdout/stderr/command/…). npm prints warnings on stderr and build chatter
+ * mentions "fail", so warn patterns win first and bare stderr stays neutral.
+ */
+function classifyVercelLevel(kind: string, text: string): string {
+  const k = kind.toLowerCase();
+  if (/warn/i.test(k) || /warn/i.test(text) || text.includes("⚠")) return "warn";
+  if (k && k !== "stderr" && /err|fail|fatal/i.test(k)) return "error";
+  if (/err(or)?|fail(ed|ure)?|fatal|exception|unhandled/i.test(text)) return "error";
+  return "info";
+}
+
+/** Runtime log events of a Vercel project's latest production deployment. */
+export async function queryVercelLogs(
+  env: Env,
+  projectId: string,
+  team: string | null,
+  limit = 50,
+): Promise<{ events: VercelLogEvent[]; error: string | null }> {
+  const token = await getSetting(env.DB, "vercel_token");
+  if (!token) return { events: [], error: "vercel not connected" };
+  const q = new URLSearchParams({ limit: "1", target: "production", projectId });
+  if (team) q.set("teamId", team);
+  let uid: string;
+  try {
+    const res = await fetch(`https://api.vercel.com/v6/deployments?${q}`, { headers: jsonHeaders(token) });
+    if (res.status === 401 || res.status === 403) return { events: [], error: "token rejected" };
+    if (!res.ok) return { events: [], error: `vercel ${res.status}` };
+    const json = (await res.json()) as { deployments?: Array<{ uid?: string }> };
+    const first = json.deployments?.[0]?.uid;
+    if (!first) return { events: [], error: null };
+    uid = first;
+  } catch (err) {
+    return { events: [], error: trunc(String(err), 160) };
+  }
+  try {
+    const eq = new URLSearchParams({ limit: String(Math.min(100, Math.max(1, limit))) });
+    if (team) eq.set("teamId", team);
+    const res = await fetch(`https://api.vercel.com/v2/deployments/${uid}/events?${eq}`, {
+      headers: jsonHeaders(token),
+    });
+    if (!res.ok) return { events: [], error: `vercel ${res.status}` };
+    const json = (await res.json()) as unknown;
+    const arr = Array.isArray(json) ? json : [];
+    const events: VercelLogEvent[] = [];
+    for (const item of arr.slice(0, 100)) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      const payload = (o.payload ?? {}) as Record<string, unknown>;
+      const text = String(payload.text ?? payload.message ?? o.message ?? "").slice(0, 300);
+      if (!text) continue;
+      const tsRaw = o.date ?? o.created ?? o.timestamp ?? Date.now();
+      const kind = String(o.type ?? "");
+      events.push({
+        ts: typeof tsRaw === "number" ? tsRaw : Date.parse(String(tsRaw)) || Date.now(),
+        level: classifyVercelLevel(kind, text),
+        message: text,
+        project: projectId,
+      });
+    }
+    return { events, error: null };
+  } catch (err) {
+    return { events: [], error: trunc(String(err), 160) };
+  }
+}
 export async function resolveVercelProject(
   token: string,
   team: string | null,
@@ -89,90 +257,151 @@ export async function resolveVercelProject(
 
 async function githubProbe(t: DeployTarget, token: string | null): Promise<DeployResult> {
   if (!t.repo || !t.repo.includes("/")) {
-    return { ok: null, detail: null, error: "bad repo (owner/repo)" };
+    return { ok: null, detail: null, error: "bad repo (owner/repo)", commits: [] };
   }
   const base = `https://api.github.com/repos/${t.repo}`;
-  const depRes = await fetch(`${base}/deployments?per_page=1`, {
+  const repoRes = await fetch(base, { headers: jsonHeaders(token) });
+  if (repoRes.status === 404) {
+    return { ok: false, detail: null, error: "repo not found (check repo or token scope)", commits: [] };
+  }
+  if (repoRes.status === 403) {
+    return { ok: null, detail: null, error: await readError(repoRes), commits: [] };
+  }
+  if (!repoRes.ok) {
+    return { ok: null, detail: null, error: `github ${repoRes.status}`, commits: [] };
+  }
+  const repo = (await repoRes.json()) as { default_branch?: string };
+  const branch = repo.default_branch || "main";
+  // 30 per check: merged into history on arrival, so a busy stretch backfills fast.
+  const comRes = await fetch(`${base}/commits?sha=${encodeURIComponent(branch)}&per_page=30`, {
     headers: jsonHeaders(token),
   });
-  if (depRes.status === 404) {
-    return { ok: false, detail: null, error: "repo not found (check repo or token scope)" };
+  if (comRes.status === 409 || comRes.status === 422) {
+    // Empty repo / unborn branch: reachable, but no signal yet — stay unknown, no alert.
+    return { ok: null, detail: `no commits on ${branch} yet`, error: null, commits: [] };
   }
-  if (depRes.status === 403) {
-    return { ok: null, detail: null, error: await readError(depRes) };
+  if (!comRes.ok) {
+    return { ok: null, detail: null, error: `github ${comRes.status}`, commits: [] };
   }
-  if (!depRes.ok) {
-    return { ok: null, detail: null, error: `github ${depRes.status}` };
-  }
-  const deployments = (await depRes.json()) as Array<{
-    id: number;
-    sha: string | null;
-    environment?: string;
+  const rows = (await comRes.json()) as Array<{
+    sha?: string;
+    html_url?: string;
+    parents?: unknown[];
+    commit?: { message?: string; author?: { date?: string } };
   }>;
-  const latest = deployments[0];
-  if (!latest) {
-    return { ok: true, detail: "no deployments yet", error: null };
+  const commits: CommitInfo[] = (rows ?? []).map((c) => ({
+    sha: (c.sha ?? "").slice(0, 7),
+    msg: (c.commit?.message ?? "commit").split("\n")[0].slice(0, 120),
+    ts: c.commit?.author?.date ? Date.parse(c.commit.author.date) : Date.now(),
+    url: c.html_url ?? null,
+    merge: (c.parents?.length ?? 0) > 1,
+  }));
+  if (!commits.length) {
+    return { ok: null, detail: `no commits on ${branch} yet`, error: null, commits: [] };
   }
-  const stRes = await fetch(`${base}/deployments/${latest.id}/statuses?per_page=1`, {
-    headers: jsonHeaders(token),
-  });
-  if (!stRes.ok) {
-    return { ok: null, detail: null, error: `github ${stRes.status}` };
-  }
-  const statuses = (await stRes.json()) as Array<{ state?: string }>;
-  const state = statuses[0]?.state ?? "pending";
-  const env = latest.environment ?? "production";
-  const sha = (latest.sha ?? "").slice(0, 7);
-  const detail = `${env}${sha ? ` · ${sha}` : ""} · ${state}`;
-  if (state === "success" || state === "active") {
-    return { ok: true, detail, error: null };
-  }
-  if (state === "pending" || state === "in_progress" || state === "queued") {
-    return { ok: true, detail: `${detail} (running)`, error: null };
-  }
-  return { ok: false, detail, error: `deploy ${state}` };
+  const head = commits[0];
+  return {
+    ok: true,
+    detail: `${branch} · ${head.sha} ${head.msg}`,
+    error: null,
+    commits,
+  };
 }
 
 async function vercelProbe(t: DeployTarget, token: string | null): Promise<DeployResult> {
-  if (!token) return { ok: null, detail: null, error: "vercel not connected" };
-  if (!t.project) return { ok: null, detail: null, error: "project required" };
+  if (!token) return { ok: null, detail: null, error: "vercel not connected", commits: [] };
+  if (!t.project) return { ok: null, detail: null, error: "project required", commits: [] };
   const qs = new URLSearchParams({ limit: "1", target: "production", projectId: t.project });
   if (t.team) qs.set("teamId", t.team);
   const res = await fetch(`https://api.vercel.com/v6/deployments?${qs.toString()}`, {
     headers: jsonHeaders(token),
   });
   if (res.status === 401 || res.status === 403) {
-    return { ok: false, detail: null, error: await readError(res) };
+    return { ok: false, detail: null, error: await readError(res), commits: [] };
   }
   if (res.status === 404) {
-    return { ok: false, detail: null, error: "project not found (check id or team)" };
+    return { ok: false, detail: null, error: "project not found (check id or team)", commits: [] };
   }
   if (!res.ok) {
-    return { ok: null, detail: null, error: `vercel ${res.status}` };
+    return { ok: null, detail: null, error: `vercel ${res.status}`, commits: [] };
   }
   const json = (await res.json()) as {
-    deployments?: Array<{ readyState?: string; url?: string; uid?: string }>;
+    deployments?: Array<{ readyState?: string; url?: string; uid?: string; created?: number }>;
   };
   const dep = json.deployments?.[0];
-  if (!dep) return { ok: true, detail: "no deployments yet", error: null };
+  if (!dep) return { ok: null, detail: "no production deploys yet", error: null, commits: [] };
   const state = dep.readyState ?? "UNKNOWN";
   const label = dep.url || dep.uid || t.project;
-  if (state === "READY") return { ok: true, detail: `${label} · ready`, error: null };
-  if (state === "ERROR") return { ok: false, detail: label, error: "deploy error" };
-  if (state === "CANCELED") return { ok: false, detail: label, error: "deploy canceled" };
-  return { ok: true, detail: `${label} · ${state.toLowerCase()}`, error: null };
+  // The deployment itself is the ship marker — analytics reads these.
+  const marker: CommitInfo | null = dep.uid
+    ? {
+        sha: dep.uid.slice(0, 7),
+        msg: `${dep.url ?? t.project} · ${state.toLowerCase()}`,
+        ts: typeof dep.created === "number" ? dep.created : Date.now(),
+        url: dep.url ? `https://${dep.url}` : null,
+        merge: false,
+      }
+    : null;
+  if (state === "READY") return { ok: true, detail: `${label} · ready`, error: null, commits: marker ? [marker] : [] };
+  if (state === "ERROR") return { ok: false, detail: label, error: "deploy error", commits: marker ? [marker] : [] };
+  if (state === "CANCELED") return { ok: false, detail: label, error: "deploy canceled", commits: marker ? [marker] : [] };
+  return { ok: true, detail: `${label} · ${state.toLowerCase()}`, error: null, commits: marker ? [marker] : [] };
 }
 
 export async function probeTarget(t: DeployTarget, env: Env): Promise<DeployResult> {
+  if (t.provider === "cloudflare") {
+    const { cloudflareProbe, cloudflareToken } = await import("../cloudflare/index");
+    try {
+      const r = await cloudflareProbe(t, await cloudflareToken(env));
+      return { commits: [], ...r };
+    } catch (err) {
+      return { ok: null, detail: null, error: trunc(String(err), 160), commits: [] };
+    }
+  }
   const token =
     t.provider === "github"
       ? await getSetting(env.DB, "github_token")
       : await getSetting(env.DB, "vercel_token");
   try {
-    return t.provider === "github" ? await githubProbe(t, token) : await vercelProbe(t, token);
+    if (t.provider === "vercel" && !t.team && t.project) {
+      // Targets added without a team scope: fall back to the log-mapping team.
+      const mapping = await getVercelMapping(env);
+      const team = mapping[t.project]?.team ?? null;
+      const r = await vercelProbe({ ...t, team }, token);
+      return { commits: [], ...r };
+    }
+    const r = t.provider === "github" ? await githubProbe(t, token) : await vercelProbe(t, token);
+    return { commits: [], ...r };
   } catch (err) {
-    return { ok: null, detail: null, error: trunc(String(err), 160) };
+    return { ok: null, detail: null, error: trunc(String(err), 160), commits: [] };
   }
+}
+
+const MAX_STORED_COMMITS = 100;
+const COMMIT_KEEP_MS = 30 * 86400000;
+
+/**
+ * Accumulate ship history: analytics charts read last_commits, so probes must
+ * merge into it (dedupe by sha, newest first, capped) instead of replacing a
+ * snapshot — a burst of pushes between checks would otherwise be lost.
+ */
+export function mergeCommits(existingRaw: string | null, fresh: CommitInfo[], now: number): string | null {
+  const bySha = new Map<string, CommitInfo>();
+  for (const c of fresh) if (c?.sha) bySha.set(c.sha, c);
+  try {
+    const prev = JSON.parse(existingRaw ?? "[]") as CommitInfo[];
+    if (Array.isArray(prev)) {
+      for (const c of prev) if (c?.sha && !bySha.has(c.sha)) bySha.set(c.sha, c);
+    }
+  } catch {
+    /* corrupt history: fresh wins */
+  }
+  const cutoff = now - COMMIT_KEEP_MS;
+  const merged = [...bySha.values()]
+    .filter((c) => (c.ts || now) >= cutoff)
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, MAX_STORED_COMMITS);
+  return merged.length ? JSON.stringify(merged) : null;
 }
 
 export type DeployStats = { scanned: number; alerts: number };
@@ -199,12 +428,12 @@ export async function scanDeploys(env: Env, now: number): Promise<DeployStats> {
     for (let j = 0; j < slice.length; j++) {
       const t = slice[j];
       const r = results[j];
-      // Infra error: record it, keep the previous status, no alert.
+      // Infra error / no signal yet: record it, keep the previous status, no alert.
       if (r.ok === null) {
         stmts.push(
           env.DB.prepare(
-            `UPDATE deploy_targets SET last_check_at = ?, last_error = ? WHERE id = ?`,
-          ).bind(now, r.error, t.id),
+            `UPDATE deploy_targets SET last_check_at = ?, last_detail = COALESCE(?, last_detail), last_error = ? WHERE id = ?`,
+          ).bind(now, r.detail, r.error, t.id),
         );
         continue;
       }
@@ -226,9 +455,9 @@ export async function scanDeploys(env: Env, now: number): Promise<DeployStats> {
         env.DB.prepare(
           `UPDATE deploy_targets SET
              status = ?, last_check_at = ?, last_detail = ?, last_error = ?,
-             consecutive = ?, last_nag_at = ?
+             consecutive = ?, last_nag_at = ?, last_commits = COALESCE(?, last_commits)
            WHERE id = ?`,
-        ).bind(next, now, r.detail, r.error, consecutive, lastNag, t.id),
+        ).bind(next, now, r.detail, r.error, consecutive, lastNag, mergeCommits(t.last_commits, r.commits ?? [], now), t.id),
       );
     }
 
@@ -239,8 +468,65 @@ export async function scanDeploys(env: Env, now: number): Promise<DeployStats> {
   return { scanned: targets.length, alerts };
 }
 
-/** Insert a target with its first real check result so the status page is truthful immediately. */
-export async function insertDeployTarget(env: Env, t: DeployTarget): Promise<void> {
+/** JSON for storage on first insert (no history to merge yet). */
+function commitsJson(r: DeployResult): string | null {
+  return r.commits?.length ? JSON.stringify(r.commits) : null;
+}
+
+const VERCEL_LOG_EVERY_MS = 5 * 60 * 1000;
+const VERCEL_LOG_CAP = 25;
+
+/**
+ * Background sync: pull runtime logs of mapped Vercel projects into log_events
+ * (D1). Throttled to every 5 min; the UNIQUE (source_id, ts, message) index
+ * makes re-pulls idempotent, so no per-project timestamp cursors are needed.
+ */
+export async function syncVercelLogs(env: Env, now: number): Promise<number> {
+  const mapping = await getVercelMapping(env);
+  const pids = Object.keys(mapping).slice(0, 5);
+  if (!pids.length) return 0;
+  const last = Number((await getSetting(env.DB, "vercel_log_poll_at")) ?? 0);
+  if (now - last < VERCEL_LOG_EVERY_MS) return 0;
+  const teamRows = await env.DB.prepare(
+    "SELECT project, team FROM deploy_targets WHERE provider = 'vercel'",
+  ).all<{ project: string | null; team: string | null }>();
+  const teamByProject = new Map(
+    (teamRows.results ?? []).filter((r) => r.project).map((r) => [r.project as string, r.team]),
+  );
+  let synced = 0;
+  let firstError: string | null = null;
+  for (const pid of pids) {
+    const entry = mapping[pid];
+    const sid = typeof entry === "string" ? entry : entry?.source;
+    if (!sid) continue;
+    const team =
+      (typeof entry === "object" && entry !== null ? entry.team : null) ??
+      teamByProject.get(pid) ??
+      null;
+    const { events, error } = await queryVercelLogs(env, pid, team, VERCEL_LOG_CAP).catch(() => ({
+      events: [],
+      error: "failed" as string | null,
+    }));
+    if (error && !firstError) firstError = `${pid.slice(0, 16)}: ${error}`;
+    synced += await putLogEvents(
+      env,
+      sid,
+      events.map((e) => ({
+        ts: e.ts,
+        level: e.level,
+        message: `[vercel] ${e.message}`,
+        data: { project: pid, message: e.message },
+      })),
+    ).catch(() => 0);
+  }
+  await setSetting(env.DB, "vercel_log_poll_at", String(now)).catch(() => {});
+  await setSetting(env.DB, "vercel_log_last", JSON.stringify({ at: now, synced, error: firstError })).catch(
+    () => {},
+  );
+  return synced;
+}
+
+/** Insert a target with its first real check result so the status page is truthful immediately. */export async function insertDeployTarget(env: Env, t: DeployTarget): Promise<void> {
   const first = await probeTarget(t, env);
   const status: "up" | "down" | "unknown" =
     first.ok == null ? "unknown" : first.ok ? "up" : "down";
@@ -248,8 +534,8 @@ export async function insertDeployTarget(env: Env, t: DeployTarget): Promise<voi
     `INSERT INTO deploy_targets (
        id, provider, name, repo, project, team, interval_min, enabled, status,
        last_check_at, last_detail, last_error, consecutive, mute_until, nag_min,
-       last_nag_at, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?)`,
+       last_nag_at, created_at, site_id, last_commits, account
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?, ?)`,
   )
     .bind(
       t.id,
@@ -267,6 +553,9 @@ export async function insertDeployTarget(env: Env, t: DeployTarget): Promise<voi
       t.mute_until,
       t.nag_min,
       t.created_at,
+      t.site_id,
+      commitsJson(first),
+      t.account,
     )
     .run();
 }
@@ -279,19 +568,28 @@ export async function listDeployTargets(env: Env): Promise<DeployTarget[]> {
 }
 
 export async function deployOverview(env: Env): Promise<{
-  targets: DeployTarget[];
+  targets: Array<DeployTarget & { commits: CommitInfo[] }>;
+  sites: Array<{ id: string; name: string }>;
   github: { connected: boolean; who: string | null };
   vercel: { connected: boolean; who: string | null };
+  cloudflare: { connected: boolean; who: string | null };
 }> {
-  const [targets, githubUser, vercelUser] = await Promise.all([
+  const [targets, githubUser, vercelUser, cloudflareUser, sites] = await Promise.all([
     listDeployTargets(env),
     getSetting(env.DB, "github_user"),
     getSetting(env.DB, "vercel_user"),
+    getSetting(env.DB, "cloudflare_user"),
+    env.DB.prepare("SELECT id, name FROM analytics_sites ORDER BY created_at ASC").all<{
+      id: string;
+      name: string;
+    }>(),
   ]);
   return {
-    targets,
+    targets: targets.map((t) => ({ ...t, commits: parseCommits(t.last_commits) })),
+    sites: sites.results ?? [],
     github: { connected: githubUser != null, who: githubUser },
     vercel: { connected: vercelUser != null, who: vercelUser },
+    cloudflare: { connected: cloudflareUser != null, who: cloudflareUser },
   };
 }
 
@@ -307,10 +605,11 @@ export async function checkTargetNow(env: Env, id: string): Promise<DeployTarget
   const consecutive = r.ok == null ? t.consecutive : next === t.status ? t.consecutive + 1 : 1;
   await env.DB.prepare(
     `UPDATE deploy_targets SET
-       status = ?, last_check_at = ?, last_detail = ?, last_error = ?, consecutive = ?
+       status = ?, last_check_at = ?, last_detail = ?, last_error = ?, consecutive = ?,
+       last_commits = COALESCE(?, last_commits)
      WHERE id = ?`,
   )
-    .bind(next, Date.now(), r.detail, r.error, consecutive, t.id)
+    .bind(next, Date.now(), r.detail, r.error, consecutive, mergeCommits(t.last_commits, r.commits ?? [], Date.now()), t.id)
     .run();
   return { ...t, status: next, last_check_at: Date.now(), last_detail: r.detail, last_error: r.error, consecutive };
 }
@@ -355,8 +654,8 @@ export async function insertDeployTargetsBulk(env: Env, targets: DeployTarget[])
       `INSERT INTO deploy_targets (
          id, provider, name, repo, project, team, interval_min, enabled, status,
          last_check_at, last_detail, last_error, consecutive, mute_until, nag_min,
-         last_nag_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?)`,
+         last_nag_at, created_at, site_id, last_commits, account
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?, ?)`,
     ).bind(
       t.id,
       t.provider,
@@ -373,6 +672,9 @@ export async function insertDeployTargetsBulk(env: Env, targets: DeployTarget[])
       t.mute_until,
       t.nag_min,
       t.created_at,
+      t.site_id,
+      commitsJson(first),
+      t.account,
     );
   });
   await env.DB.batch(stmts);

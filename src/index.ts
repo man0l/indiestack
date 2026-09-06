@@ -17,6 +17,15 @@ import { redirect } from "./kernel/http";
 import { collect, dispatch, firstKicker, sumHealth } from "./kernel/plugin";
 import { runTick } from "./kernel/tick";
 import { deployOverview } from "./integrations";
+import { listJobs } from "./heartbeat/plugin";
+import { listLogSources } from "./logs/index";
+import { TEMPLATES } from "./templates/index";
+import { listAnalyticsSites } from "./analytics/index";
+import { goalStats, listGoals } from "./goals/plugin";
+import { siteStats } from "./analytics/index";
+import { parseQuery, queryLogs } from "./explorer/query";
+import { listSignals, listWatchers } from "./signals/index";
+import { crawlSummary, ingestSnippet } from "./aicrawl/index";
 import { parseHttpUrl } from "./kernel/util";
 import { adminShell, ago, html, loginPage, overallOf, revealPage, settingsCard, statusPage } from "./ui";
 
@@ -30,6 +39,32 @@ export default {
     });
   },
 } satisfies ExportedHandler<Env>;
+
+async function logSourceList(env: Env): Promise<Array<{ id: string; name: string }>> {
+  const rows = await env.DB.prepare("SELECT id, name FROM log_sources ORDER BY created_at ASC").all<{
+    id: string;
+    name: string;
+  }>();
+  return rows.results ?? [];
+}
+
+async function lastVercelSync(env: Env): Promise<{ at: number; synced: number; error: string | null } | null> {
+  const raw = await env.DB.prepare("SELECT value FROM settings WHERE key = 'vercel_log_last'")
+    .first<{ value: string }>()
+    .then((r) => r?.value ?? null)
+    .catch(() => null);
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as { at?: unknown; synced?: unknown; error?: unknown };
+    return {
+      at: typeof o.at === "number" ? o.at : 0,
+      synced: typeof o.synced === "number" ? o.synced : 0,
+      error: typeof o.error === "string" ? o.error : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -68,6 +103,361 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (gate) return gate;
     const monitors = await env.DB.prepare("SELECT * FROM monitors ORDER BY created_at").all();
     return Response.json({ monitors: monitors.results ?? [] });
+  }
+  if (ctx.path === "/api/heartbeats" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    return Response.json({ heartbeats: await listJobs(env.DB) });
+  }
+  if (ctx.path === "/api/logsources" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    return Response.json({ sources: await listLogSources(env.DB) });
+  }
+  if (ctx.path === "/api/templates" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    return Response.json({
+      templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, interval_min: t.interval_min })),
+    });
+  }
+  if (ctx.path === "/api/vercelprojects" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const url = new URL(request.url);
+    const team = (url.searchParams.get("team") ?? "").trim() || null;
+    const fresh = url.searchParams.get("fresh") === "1";
+    const { getVercelMapping, listVercelProjects, listVercelTeams } = await import("./integrations/index");
+    const token = await env.DB.prepare("SELECT value FROM settings WHERE key = 'vercel_token'")
+      .first<{ value: string }>()
+      .then((r) => r?.value ?? null);
+    if (!token) {
+      return Response.json({ connected: false, projects: [], mapping: {} });
+    }
+    // Projects/teams only change on deploy or team shuffle: short KV cache keeps the page snappy.
+    const cacheKey = `vc:projteam:${team ?? "_"}`;
+    type ProjectLists = { projects: Array<{ id: string; name: string }>; teams: Array<{ id: string; slug: string }> };
+    let lists: ProjectLists | null = fresh
+      ? null
+      : ((await env.CACHE.get(cacheKey, "json").catch(() => null)) as ProjectLists | null);
+    let error: string | null = null;
+    if (!lists) {
+      try {
+        lists = { projects: await listVercelProjects(token, team), teams: await listVercelTeams(token).catch(() => []) };
+        await env.CACHE.put(cacheKey, JSON.stringify(lists), { expirationTtl: 180 }).catch(() => {});
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+      }
+    }
+    return Response.json({
+      connected: true,
+      projects: lists?.projects ?? [],
+      teams: lists?.teams ?? [],
+      mapping: await getVercelMapping(env),
+      sync: await lastVercelSync(env),
+      error,
+    });
+  }
+  if (ctx.path === "/api/cfworkers" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const url = new URL(request.url);
+    const fresh = url.searchParams.get("fresh") === "1";
+    const { cloudflareToken, getCfAccountId, getCfMapping, cachedWorkers, listAccounts } =
+      await import("./cloudflare/index");
+    const token = await cloudflareToken(env);
+    if (!token) {
+      return Response.json({
+        connected: false,
+        account: null,
+        accounts: [],
+        scripts: [],
+        mapping: {},
+        sources: [],
+      });
+    }
+    let account = await getCfAccountId(env);
+    let accounts: Array<{ id: string; name: string }> = [];
+    try {
+      // The accounts call is pure latency when the account id is already stored.
+      if (!account || fresh) {
+        accounts = await listAccounts(token);
+        if (!account && accounts[0]) {
+          account = accounts[0].id;
+          await env.DB.prepare(
+            "INSERT INTO settings (key, value) VALUES ('cf_account_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+          ).bind(account).run();
+        }
+      }
+    } catch (err) {
+      return Response.json({
+        connected: true,
+        account,
+        accounts,
+        scripts: [],
+        mapping: await getCfMapping(env),
+        sources: await logSourceList(env),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    let scripts: string[] = [];
+    let error: string | null = null;
+    try {
+      if (account) {
+        scripts = await cachedWorkers(env, token, account, fresh);
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    return Response.json({
+      connected: true,
+      account,
+      accounts,
+      scripts,
+      mapping: await getCfMapping(env),
+      sources: await logSourceList(env),
+      error,
+    });
+  }
+  if (ctx.path === "/api/logevents" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const url = new URL(request.url);
+    const q = parseQuery(url, url.searchParams.get("source"));
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+    const { events, sources } = await queryLogs(env, { ...q, limit });
+    return Response.json({
+      events,
+      sources: sources.map((s) => ({ id: s.id, name: s.name })),
+    });
+  }
+  if (ctx.path === "/api/analytics" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const url = new URL(request.url);
+    const origin = `${url.protocol}//${url.host}`;
+    const sites = await listAnalyticsSites(env.DB);
+    const shareRows = await env.DB.prepare("SELECT site_id, token, enabled FROM site_shares").all<{
+      site_id: string;
+      token: string;
+      enabled: number;
+    }>();
+    const shareBySite = new Map(
+      (shareRows.results ?? []).map((r) => [
+        r.site_id,
+        { on: Boolean(r.enabled), url: `${origin}/share/${r.token}` },
+      ]),
+    );
+    const linked = await env.DB.prepare(
+      "SELECT site_id, provider, last_commits FROM deploy_targets WHERE site_id IS NOT NULL",
+    ).all<{ site_id: string; provider: string; last_commits: string | null }>();
+    type Annotation = {
+      day: string;
+      kind: "commit" | "deploy" | "mention";
+      label: string;
+      sub: string;
+      url: string | null;
+    };
+    const annotationsBySite = new Map<string, Annotation[]>();
+    const push = (siteId: string, a: Annotation) => {
+      annotationsBySite.set(siteId, [...(annotationsBySite.get(siteId) ?? []), a]);
+    };
+    for (const row of linked.results ?? []) {
+      try {
+        const arr = JSON.parse(row.last_commits ?? "[]") as Array<Record<string, unknown>>;
+        if (!Array.isArray(arr)) continue;
+        for (const c of arr) {
+          if (!c || typeof c !== "object" || !c.sha) continue;
+          push(row.site_id, {
+            day: new Date(Number(c.ts) || Date.now()).toISOString().slice(0, 10),
+            kind: row.provider === "github" ? "commit" : "deploy",
+            label: String(c.sha).slice(0, 7),
+            sub: String(c.msg ?? "").slice(0, 120),
+            url: typeof c.url === "string" ? c.url : null,
+          });
+        }
+      } catch {
+        continue;
+      }
+    }
+    const mentions = await env.DB.prepare(
+      "SELECT site_id, source, title, author, url, ts FROM signals ORDER BY ts DESC LIMIT 60",
+    ).all<{ site_id: string; source: string; title: string; author: string | null; url: string | null; ts: number }>();
+    for (const m of mentions.results ?? []) {
+      push(m.site_id, {
+        day: new Date(m.ts).toISOString().slice(0, 10),
+        kind: "mention",
+        label: m.source === "x" ? `@${m.author ?? "x"}` : m.source,
+        sub: m.title.slice(0, 140),
+        url: m.url,
+      });
+    }
+    return Response.json({
+      sites: await Promise.all(
+        sites.map(async (site) => {
+          const s = await siteStats(env, site, 7);
+          return {
+            id: site.id,
+            name: site.name,
+            enabled: site.enabled,
+            totals: s.totals,
+            days: s.days,
+            topPaths: s.topPaths,
+            topRefs: s.topRefs,
+            topCountries: s.topCountries,
+            annotations: annotationsBySite.get(site.id) ?? [],
+            share: shareBySite.get(site.id) ?? { on: false, url: null },
+            snippet: `<script defer src="${origin}/a.js" data-site="${site.token}"><\/script>`,
+          };
+        }),
+      ),
+    });
+  }
+  if (ctx.path === "/api/revenue" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const since = Date.now() - 30 * 86400000;
+    const [payments, secret, totals, bySource] = await Promise.all([
+      env.DB.prepare("SELECT * FROM payments ORDER BY ts DESC LIMIT 20").all(),
+      env.DB.prepare("SELECT value FROM settings WHERE key = 'stripe_webhook_secret'").first<{
+        value: string;
+      }>(),
+      env.DB.prepare("SELECT COUNT(*) AS n, SUM(amount_cents) AS cents FROM payments WHERE ts >= ?")
+        .bind(since)
+        .first<{ n: number; cents: number | null }>(),
+      env.DB.prepare(
+        `SELECT COALESCE(source_ref, 'direct') AS src, COUNT(*) AS n, SUM(amount_cents) AS cents
+         FROM payments WHERE ts >= ? GROUP BY src ORDER BY cents DESC LIMIT 8`,
+      )
+        .bind(since)
+        .all<{ src: string; n: number; cents: number }>(),
+    ]);
+    const money = (cents: number, currency: string) => `${(cents / 100).toFixed(2)} ${currency}`;
+    return Response.json({
+      secret: Boolean(secret?.value),
+      totals: { n: totals?.n ?? 0, label: money(Number(totals?.cents ?? 0), "USD") },
+      bySource: (bySource.results ?? []).map((r) => ({
+        src: r.src,
+        n: r.n,
+        label: money(Number(r.cents), "USD"),
+      })),
+      payments: (payments.results ?? []).map((p: Record<string, unknown>) => ({
+        amount: money(Number(p.amount_cents), String(p.currency)),
+        from: p.source_ref ? String(p.source_ref) : "direct",
+        detail: `${String(p.source_path ?? "")}${p.customer ? ` · ${String(p.customer)}` : ""}`,
+        ts: Number(p.ts),
+      })),
+    });
+  }
+  if (ctx.path === "/api/aicrawls" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const url = new URL(request.url);
+    const origin = `${url.protocol}//${url.host}`;
+    const sites = await listAnalyticsSites(env.DB);
+    return Response.json({
+      sites: await Promise.all(
+        sites.map(async (site) => ({
+          id: site.id,
+          name: site.name,
+          ...(await crawlSummary(env, site.id)),
+          snippet: ingestSnippet(origin, site.token),
+        })),
+      ),
+    });
+  }
+  if (ctx.path === "/api/signals" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const [watchers, signals, sites] = await Promise.all([
+      listWatchers(env.DB),
+      listSignals(env.DB),
+      listAnalyticsSites(env.DB),
+    ]);
+    const [x, rid, rsec] = await Promise.all(
+      ["signals_x_bearer", "signals_reddit_client_id", "signals_reddit_client_secret"].map((k) =>
+        env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(k).first<{ value: string }>(),
+      ),
+    );
+    return Response.json({
+      watchers,
+      signals,
+      sites: sites.map((s) => ({ id: s.id, name: s.name })),
+      keys: { x: Boolean(x?.value), redditId: Boolean(rid?.value), redditSecret: Boolean(rsec?.value) },
+    });
+  }
+  if (ctx.path === "/api/goals" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const [goals, sites] = await Promise.all([listGoals(env.DB), listAnalyticsSites(env.DB)]);
+    const names = new Map(sites.map((s) => [s.id, s.name]));
+    return Response.json({
+      sites: sites.map((s) => ({ id: s.id, name: s.name })),
+      goals: await Promise.all(
+        goals.map(async (g) => {
+          const [s7, s30] = await Promise.all([goalStats(env, g, 7), goalStats(env, g, 30)]);
+          return {
+            id: g.id,
+            name: g.name,
+            kind: g.kind,
+            target: g.target,
+            site_name: names.get(g.site_id) ?? "",
+            s7: { converted: s7.converted, uniques: s7.uniques, rate: s7.rate_pct },
+            s30: { converted: s30.converted, uniques: s30.uniques, rate: s30.rate_pct },
+            top: s30.bySource
+              .slice(0, 3)
+              .map((b) => `${b.ref} (${b.converted})`)
+              .join(", "),
+          };
+        }),
+      ),
+    });
+  }
+  if (ctx.path === "/api/widgets" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const sites = await listAnalyticsSites(env.DB);
+    return Response.json({
+      sites: sites.map((s) => ({ id: s.id, name: s.name, token: s.token })),
+    });
+  }
+  if (ctx.path === "/api/agents" && ctx.method === "GET") {    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const tokens = await env.DB.prepare("SELECT * FROM agent_tokens ORDER BY created_at").all();
+    return Response.json({ tokens: tokens.results ?? [] });
+  }
+  if (ctx.path === "/api/shares" && ctx.method === "GET") {    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const url = new URL(request.url);
+    const origin = `${url.protocol}//${url.host}`;
+    const sites = await listAnalyticsSites(env.DB);
+    const shares = await env.DB.prepare("SELECT * FROM site_shares").all<{
+      site_id: string;
+      token: string;
+      enabled: number;
+    }>();
+    const bySite = new Map((shares.results ?? []).map((s) => [s.site_id, s]));
+    return Response.json({
+      shares: sites.map((site) => {
+        const existing = bySite.get(site.id);
+        return {
+          site_id: site.id,
+          site_name: site.name,
+          on: Boolean(existing?.enabled),
+          url: existing ? `${origin}/share/${existing.token}` : null,
+        };
+      }),
+    });
+  }
+  if (ctx.path === "/api/settings" && ctx.method === "GET") {    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const settings = await loadSettings(env, [...ALERT_SETTING_KEYS, "last_alert_error"]);
+    const listed = await env.BUCKET.list({ prefix: "rollups/" });
+    const rollups = listed.objects
+      .map((o) => o.key.replace(/^rollups\//, "").replace(/\.json$/, ""))
+      .sort()
+      .reverse();
+    return Response.json({ settings, rollups });
   }
   if (ctx.path === "/api/deploys" && ctx.method === "GET") {
     const gate = await gateAdmin(request, env);
@@ -179,7 +569,7 @@ async function adminOverview(env: Env, origin: string, msg: string | null): Prom
 
 async function adminPluginPage(pluginId: string, env: Env, origin: string, msg: string | null): Promise<Response> {
   const match = PLUGINS.find((p) => p.id === pluginId);
-  if (!match || !match.adminNav) return new Response("not found", { status: 404 });
+  if (!match || !match.adminSection) return new Response("not found", { status: 404 });
   return renderAdminPage(env, origin, pluginId, msg);
 }
 
@@ -201,6 +591,7 @@ async function buildAdminPage(
     island = "overview";
     content = overviewCards(cards);
   } else if (activeId === "settings") {
+    island = "settings";
     const settings = await loadSettings(env, [...ALERT_SETTING_KEYS, "last_alert_error"]);
     const listed = await env.BUCKET.list({ prefix: "rollups/" });
     const rollups = listed.objects
@@ -214,7 +605,7 @@ async function buildAdminPage(
     else content = await plugin.adminSection({ env, origin, title: env.APP_NAME });
     footer = plugin?.adminFooter ?? null;
     // Islands exist per plugin; the Svelte bundle replaces this div's content on mount.
-    if (["ping", "integrations"].includes(activeId)) island = activeId;
+    if (["ping", "integrations", "heartbeat", "logs", "templates", "settings", "backup", "share", "agents", "widgets", "goals", "signals", "aicrawl", "revenue", "analytics", "explorer"].includes(activeId)) island = activeId;
   }
   return { activeId, cards, content, island, footer };
 }

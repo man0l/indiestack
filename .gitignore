@@ -24,6 +24,7 @@ status-*.png
 !admin/
 !mockups/
 !scripts/
+src/kernel/assets.ts
 !.dev.vars.example
 !.zcode/
 !components.json

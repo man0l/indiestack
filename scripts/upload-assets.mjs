@@ -11,5 +11,7 @@ for (const f of readdirSync(dir)) {
   if (!statSync(join(dir, f)).isFile()) continue;
   const ext = f.slice(f.lastIndexOf('.'));
   const type = types[ext] ?? 'application/octet-stream';
-  execSync(`npx wrangler r2 object put indiestack/assets/${f} --file=${join(dir, f)} --content-type='${type}' --remote`, { stdio: 'inherit' });
+  // NOTE: double quotes (stripped by cmd); single quotes would be stored
+  // literally in R2 metadata and break module scripts in browsers.
+  execSync(`npx wrangler r2 object put indiestack/assets/${f} --file "${join(dir, f)}" --content-type "${type}" --remote`, { stdio: 'inherit' });
 }

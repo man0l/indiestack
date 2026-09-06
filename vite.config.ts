@@ -11,20 +11,20 @@ export default defineConfig({
     emptyOutDir: true,
     manifest: false,
     rollupOptions: {
-      input: { admin: resolve(__dirname, 'admin/index.html') },
+      input: { admin: resolve(import.meta.dirname, 'admin/index.html') },
       output: {
-        entryFileNames: '_app/admin.js',
-        chunkFileNames: '_app/[name].js',
-        assetFileNames: '_app/[name][extname]',
+        entryFileNames: '_app/admin.[hash].js',
+        chunkFileNames: '_app/[name].[hash].js',
+        assetFileNames: '_app/[name].[hash][extname]',
       },
     },
   },
   resolve: {
     alias: [
-      { find: '$lib/utils', replacement: resolve(__dirname, 'admin/src/lib/utils') },
-      { find: '$lib/components', replacement: resolve(__dirname, 'admin/src/lib/components') },
-      { find: '$lib', replacement: resolve(__dirname, 'admin/src/lib') },
-      { find: '$components', replacement: resolve(__dirname, 'admin/src/lib') },
+      { find: '$lib/utils', replacement: resolve(import.meta.dirname, 'admin/src/lib/utils') },
+      { find: '$lib/components', replacement: resolve(import.meta.dirname, 'admin/src/lib/components') },
+      { find: '$lib', replacement: resolve(import.meta.dirname, 'admin/src/lib') },
+      { find: '$components', replacement: resolve(import.meta.dirname, 'admin/src/lib') },
     ],
   },
 });

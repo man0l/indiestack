@@ -1,4 +1,5 @@
 import { isMuted } from "./kernel/types";
+import { ADMIN_CSS, ADMIN_JS } from "./kernel/assets";
 
 export function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
@@ -41,15 +42,16 @@ export function ghostLink(href: string, label: string): string {
   return `<a class="btn ghost" href="${esc(href)}" style="display:inline-block;text-decoration:none;border:1px solid var(--line);background:transparent;color:var(--ink)">${esc(label)}</a>`;
 }
 
-export function page(title: string, body: string, extraHead = ""): string {
+export function page(title: string, body: string, extraHead = "", htmlClass = ""): string {
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${htmlClass ? ` class="${htmlClass}"` : ""}>
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>${esc(title)}</title>
   <style>
     :root {
+      color-scheme: dark;
       --bg: #0e1014;
       --card: #171a21;
       --ink: #eef0f4;
@@ -66,10 +68,14 @@ export function page(title: string, body: string, extraHead = ""): string {
       min-height: 100dvh;
       background: var(--bg);
       color: var(--ink);
-      font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      font: 15px/1.45 "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    :where(body:not(.isl)) a { color: var(--accent); text-decoration: none; }
+    :where(body:not(.isl)) a:hover { text-decoration: underline; }
     main { max-width: 720px; margin: 0 auto; padding: 28px 20px 64px; }
     header {
       display: flex; align-items: baseline; justify-content: space-between;
@@ -115,8 +121,8 @@ export function page(title: string, body: string, extraHead = ""): string {
       padding: 16px;
       margin: 16px 0;
     }
-    label { display: block; font-size: 12px; color: var(--mute); margin-bottom: 10px; }
-    input[type=text], input[type=url], input[type=password], input[type=number], input[type=datetime-local], select, textarea {
+    :where(body:not(.isl)) label { display: block; font-size: 12px; color: var(--mute); margin-bottom: 10px; }
+    :where(body:not(.isl)) input[type=text], :where(body:not(.isl)) input[type=url], :where(body:not(.isl)) input[type=password], :where(body:not(.isl)) input[type=number], :where(body:not(.isl)) input[type=datetime-local], :where(body:not(.isl)) select, :where(body:not(.isl)) textarea {
       width: 100%;
       margin-top: 4px;
       padding: 8px 10px;
@@ -126,7 +132,10 @@ export function page(title: string, body: string, extraHead = ""): string {
       color: var(--ink);
       font: inherit;
     }
-    button, .btn {
+    /* Bare-element form styling serves no-JS/server pages only. Once an island
+       mounts (body.isl) shadcn components own their look; shell chrome re-opts
+       in via #check-form so it never leaks into islands or portal'ed overlays. */
+    :where(body:not(.isl)) button, #check-form button, .btn {
       appearance: none; border: 0; border-radius: 8px;
       background: var(--accent); color: #111; font-weight: 650;
       padding: 8px 12px; cursor: pointer; font: inherit;
@@ -168,31 +177,85 @@ export function page(title: string, body: string, extraHead = ""): string {
     details.fold[open] > summary::before { content: "–  "; }
     details.fold .card { margin-top: 8px; }
     
-    /* admin shell — sidebar + cards (linear dark) */
+    /* admin shell — sidebar ≥1024px, sticky topbar + drawer below. Breakpoints match Tailwind (640/768/1024). */
     .admin { display: flex; min-height: 100dvh; }
     .sidebar {
-      width: 220px; min-width: 220px; flex-shrink: 0;
+      width: 248px; min-width: 248px; flex-shrink: 0;
       background: #0c0d10; border-right: 1px solid var(--line);
-      padding: 16px 12px; position: sticky; top: 0; height: 100dvh; overflow-y: auto;
+      padding: 16px 12px 24px; position: sticky; top: 0; height: 100dvh; overflow-y: auto;
     }
-    .sbrand { font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
+    .sbrand { font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; padding: 4px 8px; }
     .sbrand span { color: var(--mute); font-weight: 500; }
-    .sg { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); margin: 14px 0 6px; }
-    .sitem {
+    .sg { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); margin: 14px 0 6px; padding: 0 8px; }
+    .sitem, .ditem {
       display: flex; align-items: center; gap: 8px;
-      padding: 6px 8px; border-radius: 7px; color: #a8adb7; font-size: 13px; text-decoration: none;
+      padding: 10px 12px; border-radius: 8px; color: #a8adb7; font-size: 14px; text-decoration: none;
+      min-height: 44px;
     }
-    .sitem:hover { background: #171a21; color: var(--ink); text-decoration: none; }
-    .sitem.active { background: #171a21; color: var(--ink); }
+    .sitem:hover, .ditem:hover { background: #171a21; color: var(--ink); text-decoration: none; }
+    .sitem.active, .ditem.active { background: #171a21; color: var(--ink); font-weight: 600; }
     .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--mute); flex-shrink: 0; }
     .sdot.up { background: var(--up); }
     .sdot.down { background: var(--down); }
     .scount { margin-left: auto; color: var(--mute); font-variant-numeric: tabular-nums; font-size: 12px; }
-    .amain { flex: 1; min-width: 0; padding: 20px 22px 56px; }
-    .ahead { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .flash { color: var(--mute); font-size: 13px; }
+    .amain { flex: 1; min-width: 0; padding: 0 16px 48px; }
+    .acontent { max-width: 1120px; margin: 0 auto; }
+    /* sticky topbar: nav + primary action always in reach */
+    .atop {
+      position: sticky; top: 0; z-index: 30;
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 0;
+      background: var(--bg);
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 16px;
+    }
+    .abrand { font-weight: 700; letter-spacing: -0.02em; display: none; }
+    .abrand span { color: var(--mute); font-weight: 500; }
+    .atitle { display: none; color: var(--mute); font-size: 13px; }
+    @media (min-width: 1024px) {
+      .atitle { display: block; }
+    }
+    .atop .spacer { flex: 1; }
+    .flash { color: var(--mute); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .island-err {
+      border: 1px solid var(--down); border-radius: 12px;
+      background: color-mix(in srgb, var(--down) 12%, transparent);
+      color: var(--ink); padding: 12px 14px; margin-bottom: 16px; font-size: 14px;
+    }
+    .island-err b { color: var(--down); }
     .sghost { background: transparent; color: var(--mute); border: 1px solid var(--line); padding: 6px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    /* drawer (mobile nav): <details> so it works with no JS */
+    .drawer { display: none; }
+    .topbar-island { display: none; }
+    .dbtn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 44px; height: 44px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--line); background: transparent; color: var(--ink);
+      list-style: none; flex-shrink: 0;
+    }
+    .dbtn::-webkit-details-marker { display: none; }
+    .drawer[open] .dback { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.55); cursor: pointer; }
+    .drawer[open] .dbtn { position: relative; z-index: 42; }
+    .dpanel {
+      position: fixed; z-index: 41; top: 0; left: 0; bottom: 0; width: min(300px, 84vw);
+      background: #0c0d10; border-right: 1px solid var(--line);
+      padding: 76px 12px 24px; overflow-y: auto; overscroll-behavior: contain;
+    }
+    /* thin dark scrollbars everywhere (needs color-scheme: dark above) */
+    * { scrollbar-width: thin; scrollbar-color: #2f3544 transparent; }
+    *::-webkit-scrollbar { width: 8px; height: 8px; }
+    *::-webkit-scrollbar-thumb { background: #2f3544; border-radius: 4px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    .dhead { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 12px; font-weight: 700; }
+    .dhead span { color: var(--mute); font-weight: 500; }
+    .cards { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 640px) {
+      .cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+      .amain { padding: 0 20px 56px; }
+    }
+    @media (min-width: 768px) {
+      .amain { padding: 0 24px 56px; }
+    }
     .pcard {
       display: block; text-decoration: none; color: inherit;
       background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
@@ -202,20 +265,22 @@ export function page(title: string, body: string, extraHead = ""): string {
     .pcard .sub { margin: 6px 0 0; font-size: 13px; }
     .pcard .dot { display: inline-block; vertical-align: middle; margin-right: 6px; }
 
-    @media (max-width: 820px) {
-      .admin { flex-direction: column; }
-      .sidebar { width: auto; min-width: 0; height: auto; position: static; display: flex; gap: 8px; overflow-x: auto; white-space: nowrap; }
-      .sidebar .sg { display: none; }
-      .amain { padding: 16px; }
+    @media (max-width: 1023px) {
+      .sidebar { display: none; }
+      .drawer { display: block; }
+      .topbar-island { display: block; }
+      .abrand { display: block; }
     }
 
-    @media (max-width: 560px) {
+    @media (max-width: 639px) {
       h1 { font-size: 32px; }
       .row { grid-template-columns: 14px 1fr; }
       .meta, .actions { grid-column: 2; text-align: left; justify-content: flex-start; }
       .log-event > summary { grid-template-columns: 4.75rem 1fr; }
-      .log-event .meta { grid-column: 2; text-align: left; }
+      .log-event > summary .meta { grid-column: 2; }
       .log-event pre { margin-left: 0; }
+      .flash { display: none; }
+      .atop button[type=submit] { padding: 8px 10px; }
     }
   </style>
   ${extraHead}
@@ -229,7 +294,7 @@ export function page(title: string, body: string, extraHead = ""): string {
 export function html(body: string, status = 200, headers?: HeadersInit): Response {
   return new Response(body, {
     status,
-    headers: { "content-type": "text/html; charset=utf-8", ...headers },
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", ...headers },
   });
 }
 
@@ -328,34 +393,65 @@ export function adminShell(opts: {
     distribute: "distribute",
     system: "system",
   };
-  const sidebar = `<aside class="sidebar">
-    <div class="sbrand">${opts.title} <span>admin</span></div>
-    <a class="sitem ${opts.activeId === "overview" ? "active" : ""}" href="/admin">overview</a>
-    ${groups.map((g) => {
+  const item = (id: string, href: string, inner: string, cls: string) =>
+    `<a class="${cls}${opts.activeId === id ? " active" : ""}" href="${esc(href)}"${opts.activeId === id ? ` aria-current="page"` : ""}>${inner}</a>`;
+  const dot = (d: string) => `<span class="sdot ${esc(d)}"></span>`;
+  const activeLabel = opts.activeId === "overview"
+    ? "overview"
+    : (opts.cards.find((c) => c.id === opts.activeId)?.label ?? opts.activeId);
+  const count = (s: string) => (s ? `<span class="scount">${esc(s)}</span>` : "");
+  const navItems = (cls: string) =>
+    item("overview", "/admin", "overview", cls) +
+    groups.map((g) => {
       const items = opts.cards.filter((c) => c.group === g);
       if (!items.length) return "";
       return `<div class="sg">${esc(groupLabels[g])}</div>` + items.map((c) =>
-        `<a class="sitem ${opts.activeId === c.id ? "active" : ""}" href="${esc(c.href)}"><span class="sdot ${esc(c.dot)}"></span>${esc(c.label)}${c.summary ? `<span class="scount">${esc(c.summary)}</span>` : ""}</a>`
+        item(c.id, c.href, `${dot(c.dot)}${esc(c.label)}${count(c.summary)}`, cls)
       ).join("");
-    }).join("")}
-    <div class="sg">elsewhere</div>
-    <a class="sitem" href="/">status ↗</a>
-    <a class="sitem" href="/agents.md">/agents.md</a>
+    }).join("") +
+    `<div class="sg">elsewhere</div>` +
+    `<a class="${cls}" href="/">status ↗</a>` +
+    `<a class="${cls}" href="/agents.md">/agents.md</a>`;
+  const sidebar = `<aside class="sidebar" aria-label="admin">
+    <div class="sbrand">${esc(opts.title)} <span>admin</span></div>
+    <nav>${navItems("sitem")}</nav>
     <form method="post" action="/logout" style="margin-top:10px"><button class="sghost" type="submit">logout</button></form>
   </aside>`;
+  const drawer = `<noscript><details class="drawer" id="navdrawer">
+    <summary class="dbtn" aria-label="open menu"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h14M3 10h14M3 15h14"/></svg></summary>
+    <div class="dback" onclick="document.getElementById('navdrawer').removeAttribute('open')"></div>
+    <nav class="dpanel" aria-label="admin">
+      <div class="dhead">${esc(opts.title)} <span>admin</span></div>
+      ${navItems("ditem")}
+      <form method="post" action="/logout" style="margin-top:10px"><button class="sghost" type="submit">logout</button></form>
+    </nav>
+  </details></noscript>`;
+  const navJson = JSON.stringify({ title: opts.title, activeId: opts.activeId, cards: opts.cards }).replace(
+    /</g,
+    "\\u003c",
+  );
   return page(
     `admin · ${opts.title}`,
     `<div class="admin">
       ${sidebar}
       <div class="amain">
-        <div class="ahead">
-          <form id="check-form" method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
+        <div class="atop">
+          <div class="topbar-island" data-island="topbar"></div>
+          <script type="application/json" id="nav-data">${navJson}</script>
+          ${drawer}
+          <div class="abrand">${esc(opts.title)} <span>admin</span></div>
+          <span class="atitle">${esc(activeLabel)}</span>
+          <div class="spacer"></div>
           ${opts.flash ? `<span class="flash">${esc(opts.flash)}</span>` : ""}
+          <form id="check-form" method="post" action="/admin/check" style="display:inline"><button type="submit">check now</button></form>
         </div>
-        <div ${opts.island ? `data-island="${esc(opts.island)}"` : ""}>${opts.content}</div>
+        <div class="acontent">${opts.island ? `<div class="dark" data-island="${esc(opts.island)}"><div class="island-loading flex flex-col gap-2" aria-hidden="true"><div class="h-12 animate-pulse rounded-lg bg-muted"></div><div class="h-12 animate-pulse rounded-lg bg-muted"></div><div class="h-12 animate-pulse rounded-lg bg-muted"></div></div><noscript><style>.island-loading{display:none}</style>${opts.content}</noscript></div><noscript><div class="island-err"><b>JavaScript is off.</b> Server pages work, but live tables need the admin bundle.</div></noscript><script>(function(){if(!document.querySelector('[data-island]'))return;setTimeout(function(){if(window.__isl)return;var d=document.createElement('div');d.className='island-err';d.setAttribute('role','alert');d.innerHTML='<b>Interactive dashboard failed to load.</b> Reload the page — if this persists, the admin bundle is unreachable.';var c=document.querySelector('.acontent');if(c)c.prepend(d);},6000);})();</script>` : `<div class="dark">${opts.content}</div>`}</div>
       </div>
     </div>`,
-    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><link rel="stylesheet" href="/_app/admin.css?v=4"/><script type="module" src="/_app/admin.js?v=4"></script>`,
+    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><link rel="stylesheet" href="${ADMIN_CSS}"/><script type="module" src="${ADMIN_JS}"></script><style>/* admin.css loads after the shell: re-assert the dark canvas + shell tokens it collides with (--card/--accent). Islands always render inside .dark, so their tokens are untouched. */
+    html,body{background:#0e1014;color:#eef0f4}
+    :root{--card:#171a21;--accent:#c8f542}</style>`,
+    "dark",
   );
 }
 

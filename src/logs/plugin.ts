@@ -12,13 +12,29 @@ import { adminLogs } from "./ui";
 export const logs: Plugin = {
   id: "logs",
   adminNav: { group: "monitoring", label: "logs" },
-  adminFooter: "Logs are admin-only, 8KB max, 24h in R2. Tail and search live in the explorer plugin.",
+  adminFooter: "Logs are admin-only, 8KB max, 24h in D1. Tail and search live in the explorer plugin.",
   async summary(ctx: SectionCtx) {
     const n = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM log_sources").first<{ n: number }>();
     return `${n?.n ?? 0}/10 logs`;
   },
   async adminSection(ctx: SectionCtx) {
-    return adminLogs(await listLogSources(ctx.env.DB), ctx.origin);
+    const [sources, cfMapping, vMapping] = await Promise.all([
+      listLogSources(ctx.env.DB),
+      import("../cloudflare/index").then((m) => m.getCfMapping(ctx.env)),
+      import("../integrations/index").then((m) => m.getVercelMapping(ctx.env)),
+    ]);
+    const names = new Map(sources.map((s) => [s.id, s.name]));
+    const mapped = [
+      ...Object.entries(cfMapping).map(([worker, pref]) => ({
+        worker,
+        source: names.get(pref.source) ?? pref.source,
+      })),
+      ...Object.entries(vMapping).map(([project, entry]) => {
+        const sid = typeof entry === "string" ? entry : entry?.source ?? project;
+        return { worker: `vercel:${project}`, source: names.get(sid) ?? sid };
+      }),
+    ];
+    return adminLogs(sources, ctx.origin, mapped);
   },
   async tick(env, now) {
     await maybePruneLogs(env, now);

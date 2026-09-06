@@ -79,13 +79,13 @@ with an **agent token** minted by the owner in \`/admin\`.
 
 - \`POST ${origin}/mcp/<agent-token>\` — JSON-RPC 2.0. Tools:
   \`get_overview\`, \`list_monitors\`, \`list_heartbeats\`, \`list_deploys\`,
-  \`recent_incidents\`, \`get_analytics\`.
+  \`recent_incidents\`, \`get_analytics\`, \`list_log_sources\`, \`query_logs\`.
 - \`GET ${origin}/mcp/<agent-token>\` → 405 (no SSE; POST only)
 
 ## Ingest (owner's tokens, per source)
 
 - \`GET|POST /beat/<job-token>\` — cron heartbeat. Silence past interval + grace alerts.
-- \`POST /log/<source-token>\` — JSON body (8KB max), kept 24h in R2.
+- \`POST /log/<source-token>\` — JSON body (8KB max), kept 24h in D1.
 
 ## Etiquette
 
@@ -222,6 +222,27 @@ const TOOLS: Array<Record<string, unknown>> = [
       additionalProperties: false,
     },
   },
+  {
+    name: "list_log_sources",
+    description: "Log sources (names + ids) the owner defined; use an id or name as `source` in query_logs.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "query_logs",
+    description:
+      "Recent log events (24h retention): app logs, cron heartbeats, provider (Cloudflare/Vercel) logs. Filter by source, level (error/warn/info) and text search; newest first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "log source id or name, e.g. from list_log_sources" },
+        level: { type: "string", description: "filter: error, warn or info" },
+        search: { type: "string", description: "case-insensitive substring of the message" },
+        hours: { type: "number", description: "lookback window, default 24, max 24 (retention)" },
+        limit: { type: "number", description: "max events, default 50, max 100" },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 async function callTool(env: Env, name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -309,6 +330,42 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
         .bind(sinceDay)
         .all();
       return { window_days: days, totals, top_paths: top.results ?? [] };
+    }
+    case "list_log_sources": {
+      const { results } = await env.DB.prepare(
+        "SELECT id, name, enabled, created_at FROM log_sources ORDER BY created_at ASC",
+      ).all();
+      return decorateTimes(results ?? [], ["created_at"]);
+    }
+    case "query_logs": {
+      const where: string[] = [];
+      const binds: (string | number)[] = [];
+      const source = String(args.source ?? "").trim();
+      if (source) {
+        where.push("(e.source_id = ? OR e.source_id IN (SELECT id FROM log_sources WHERE name = ?))");
+        binds.push(source, source);
+      }
+      const level = String(args.level ?? "").trim().toLowerCase();
+      if (level) {
+        where.push("IFNULL(LOWER(e.level), 'log') = ?");
+        binds.push(level);
+      }
+      const search = String(args.search ?? "").trim();
+      if (search) {
+        const needle = search.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`);
+        where.push("LOWER(e.message) LIKE ? ESCAPE '\\'");
+        binds.push(`%${needle}%`);
+      }
+      const hours = clampNum(args.hours, 1, 24, 24);
+      where.push("e.ts >= ?");
+      binds.push(now - hours * 3600000);
+      const sql = `SELECT e.source_id, s.name AS source_name, e.ts, e.level, e.message, e.data
+         FROM log_events e LEFT JOIN log_sources s ON s.id = e.source_id
+         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+         ORDER BY e.ts DESC LIMIT ?`;
+      binds.push(clampNum(args.limit, 1, 100, 50));
+      const { results } = await env.DB.prepare(sql).bind(...binds).all();
+      return decorateTimes(results ?? [], ["ts"]);
     }
     default:
       throw new Error(`unknown tool: ${name}`);

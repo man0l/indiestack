@@ -5,7 +5,10 @@
   "compatibility_date": "2026-09-01",
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
+    "logs": {
+      "invocation_logs": true
+    }
   },
   "vars": {
     "APP_NAME": "indiestack"
@@ -26,6 +29,13 @@
     {
       "binding": "BUCKET",
       "bucket_name": "indiestack"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "7bf1c43db24a441f987e00666b8b56dd",
+      "preview_id": "2f9c596c792a48c49d8f49b51a9386d4"
     }
   ],
   "ai": {
