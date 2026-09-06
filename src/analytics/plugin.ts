@@ -1,6 +1,7 @@
 import { redirect, toggleEnabled } from "../kernel/http";
 import type { Plugin, RouteCtx, SectionCtx } from "../kernel/plugin";
 import {
+  CLIENT_VID_RE,
   MAX_ANALYTICS_SITES,
   type EventPayload,
   collectorScript,
@@ -90,7 +91,9 @@ export const analytics: Plugin = {
       const day = new Date(now).toISOString().slice(0, 10);
       const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
       const country = (request as Request & { cf?: { country?: string } }).cf?.country ?? null;
-      const vid = await visitorBucket(env, site.token, ip, day);
+      const clientVid = typeof body.v === "string" && CLIENT_VID_RE.test(body.v) ? body.v : null;
+      const vid =
+        site.id_mode === "persistent" && clientVid ? clientVid : await visitorBucket(env, site.token, ip, day);
       const ident = email ? await identifyHash(env, email) : null;
       const rawPath = typeof body.p === "string" && body.p.startsWith("/") ? body.p.slice(0, 200) : "/";
       const rawRef = typeof body.r === "string" && body.r ? body.r.slice(0, 200) : null;
@@ -113,6 +116,7 @@ export const analytics: Plugin = {
       const form = await request.formData();
       const name = String(form.get("name") ?? "").trim().slice(0, 40);
       if (!name) return redirect("/admin?msg=name%20required");
+      const mode = form.get("mode") === "persistent" ? "persistent" : "daily";
       const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM analytics_sites").first<{
         n: number;
       }>();
@@ -120,9 +124,9 @@ export const analytics: Plugin = {
         return redirect("/admin?msg=max%203%20analytics%20sites");
       }
       await env.DB.prepare(
-        "INSERT INTO analytics_sites (id, name, token, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO analytics_sites (id, name, token, created_at, id_mode) VALUES (?, ?, ?, ?, ?)",
       )
-        .bind(crypto.randomUUID(), name, crypto.randomUUID().replaceAll("-", ""), Date.now())
+        .bind(crypto.randomUUID(), name, crypto.randomUUID().replaceAll("-", ""), Date.now(), mode)
         .run();
       return redirect("/admin?msg=site%20added%20%E2%80%94%20paste%20the%20snippet");
     }

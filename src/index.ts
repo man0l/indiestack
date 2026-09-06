@@ -300,6 +300,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
             id: site.id,
             name: site.name,
             enabled: site.enabled,
+            idMode: site.id_mode,
             totals: s.totals,
             days: s.days,
             topPaths: s.topPaths,

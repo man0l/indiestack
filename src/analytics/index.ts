@@ -2,12 +2,16 @@ export const MAX_ANALYTICS_SITES = 3;
 export const MAX_HITS_PER_SITE_DAY = 2000;
 export const MAX_PATH = 200;
 
+export type AnalyticsSiteIdMode = "daily" | "persistent";
+
 export type AnalyticsSite = {
   id: string;
   name: string;
   token: string;
   enabled: number;
   created_at: number;
+  /** 'daily': cookie-free rotating hash · 'persistent': client localStorage UUID. */
+  id_mode: AnalyticsSiteIdMode;
 };
 
 export async function listAnalyticsSites(db: D1Database): Promise<AnalyticsSite[]> {
@@ -26,8 +30,20 @@ export function collectorScript(): string {
   if(document.visibilityState==="prerender") return;
   var o=new URL(s.src).origin;
   var last=location.pathname;
+  function vid(){
+    try{
+      var k="df_vid_"+site;
+      var v=localStorage.getItem(k);
+      if(!v){
+        v=(crypto&&crypto.randomUUID)?crypto.randomUUID():"v"+String(Date.now())+Math.random().toString(36).slice(2,10);
+        localStorage.setItem(k,v);
+      }
+      return v;
+    }catch(_){return "";}
+  }
   function post(path,obj){
     obj.s=site;
+    obj.v=vid();
     var b=JSON.stringify(obj);
     if(navigator.sendBeacon) navigator.sendBeacon(o+path,b);
     else fetch(o+path,{method:"POST",body:b,keepalive:true});
@@ -49,7 +65,10 @@ export function collectorScript(): string {
 })();`;
 }
 
-export type HitPayload = { s: string; p: string; r?: string | null; w?: number };
+export type HitPayload = { s: string; p: string; r?: string | null; w?: number; v?: string | null };
+
+/** Persistent-mode client ID: random UUID-ish, not free text. */
+export const CLIENT_VID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 export function parseHit(raw: string): HitPayload | null {
   try {
@@ -61,7 +80,8 @@ export function parseHit(raw: string): HitPayload | null {
       p = "/";
     }
     const r = typeof v.r === "string" && v.r ? v.r.slice(0, MAX_PATH) : null;
-    return { s, p, r };
+    const cv = typeof v.v === "string" && CLIENT_VID_RE.test(v.v) ? v.v : null;
+    return { s, p, r, v: cv };
   } catch {
     return null;
   }
@@ -120,10 +140,10 @@ export async function recordHit(
   ip: string,
 ): Promise<RecordHitResult> {
   const site = await env.DB.prepare(
-    "SELECT id, token FROM analytics_sites WHERE token = ? AND enabled = 1",
+    "SELECT id, token, id_mode FROM analytics_sites WHERE token = ? AND enabled = 1",
   )
     .bind(payload.s)
-    .first<{ id: string; token: string }>();
+    .first<{ id: string; token: string; id_mode: AnalyticsSiteIdMode }>();
   if (!site) return { ok: false, counted: false };
   const now = Date.now();
   const day = new Date(now).toISOString().slice(0, 10);
@@ -136,7 +156,10 @@ export async function recordHit(
   if ((count?.n ?? 0) >= MAX_HITS_PER_SITE_DAY) {
     return { ok: true, counted: false };
   }
-  const vid = await visitorBucket(env, site.token, ip, day);
+  const vid =
+    site.id_mode === "persistent" && payload.v
+      ? payload.v
+      : await visitorBucket(env, site.token, ip, day);
   await env.DB.prepare(
     "INSERT INTO hits (site_id, day, ts, path, ref, country, vid) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )

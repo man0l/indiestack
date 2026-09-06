@@ -33,6 +33,7 @@
     id: string;
     name: string;
     enabled: number;
+    idMode: 'daily' | 'persistent';
     totals: { views: number; uniques: number };
     days: Array<{ day: string; views: number; uniques: number }>;
     topPaths: Array<{ path: string; views: number }>;
@@ -151,7 +152,7 @@
         <Empty.Header>
           <Empty.Media variant="icon"><FolderIcon /></Empty.Media>
           <Empty.Title>No sites</Empty.Title>
-          <Empty.Description>Add one, paste the snippet, get cookie-free pageviews.</Empty.Description>
+          <Empty.Description>Add one, pick a visitor-ID mode, paste the snippet.</Empty.Description>
         </Empty.Header>
       </Empty.Root>
     {:else}
@@ -162,6 +163,9 @@
               <span class="text-sm font-semibold">{s.name}</span>
               {#if !s.enabled}<Badge variant="secondary">paused</Badge>{/if}
               <Badge variant={s.share.on ? 'success' : 'secondary'}>{s.share.on ? 'public' : 'private'}</Badge>
+              <Badge variant="outline" title={s.idMode === 'persistent' ? 'Returning visitors recognized across days via first-party localStorage ID' : 'Cookie-free daily-rotating visitor hash'}>
+                {s.idMode === 'persistent' ? 'persistent id' : 'cookie-free'}
+              </Badge>
               <span class="ml-auto flex shrink-0 gap-1">
                 {#if s.share.on && s.share.url}
                   <Button variant="ghost" size="icon" title="open public chart" href={s.share.url} target="_blank" rel="noopener">
@@ -217,6 +221,7 @@
   <Card.Root class="mt-3">
     <Card.Header>
       <Card.Title>new site</Card.Title>
+      <Card.Description>Pick how visitors are counted before you paste the snippet.</Card.Description>
     </Card.Header>
     <Card.Content>
       <form method="post" action="/admin/analytics" onsubmit={() => setTimeout(load, 600)}>
@@ -224,6 +229,32 @@
           <Field.Field>
             <Field.FieldLabel for="name">site name</Field.FieldLabel>
             <Input id="name" name="name" maxlength={40} placeholder="marketing site" required />
+          </Field.Field>
+          <Field.Field>
+            <Field.FieldLabel>visitor id mode</Field.FieldLabel>
+            <div class="flex flex-col gap-2">
+              <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-card p-3 has-[:checked]:border-ring">
+                <input type="radio" name="mode" value="daily" checked class="mt-0.5 size-4 accent-current" />
+                <span class="flex flex-col gap-1">
+                  <span class="text-sm font-medium">cookie-free (daily)</span>
+                  <span class="text-xs text-muted-foreground">
+                    Nothing is stored in the visitor's browser — a salted daily-rotating hash counts uniques.
+                    Returning visitors are <b>not</b> linked across days. Safest default: no cookie-policy mention needed in most cases.
+                  </span>
+                </span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-card p-3 has-[:checked]:border-ring">
+                <input type="radio" name="mode" value="persistent" class="mt-0.5 size-4 accent-current" />
+                <span class="flex flex-col gap-1">
+                  <span class="text-sm font-medium">persistent id (localStorage)</span>
+                  <span class="text-xs text-muted-foreground">
+                    A random ID is kept in the visitor's localStorage (no cookies), so returning visitors are
+                    recognized across days. <b>Advised:</b> mention analytics storage in your site's privacy
+                    or cookie policy — some jurisdictions treat it like a cookie.
+                  </span>
+                </span>
+              </label>
+            </div>
           </Field.Field>
         </Field.FieldGroup>
         <Button type="submit" class="mt-4" disabled={busy !== ''}>
