@@ -40,7 +40,11 @@ export default {
       try {
         await trackAIBotResponse(request, response, execCtx, {
           websiteId: env.INDIESTACK_SITE_ID,
-          onEvent: (event) => ingestAIBotEvent(env, event),
+          onEvent: (event) => {
+            // cf.asn is authoritative here — the worker IS the edge.
+            const asn = (request as Request & { cf?: { asn?: number } }).cf?.asn;
+            return ingestAIBotEvent(env, { ...event, asn });
+          },
         });
       } catch (err) {
         console.error("[ai-bots] self-track failed", String(err));

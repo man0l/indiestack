@@ -1,6 +1,6 @@
 {
   "name": "indiestack-ai-bots",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Server-side AI bot tracking for indiestack analytics. Detects AI assistants, AI search systems and training crawlers requesting pages on your site — from Next.js proxy, Cloudflare Workers/Pages, Express, Hono or any web-standard handler.",
   "type": "module",
   "main": "./dist/index.js",

@@ -40,6 +40,13 @@ export type AIBotOptions = {
   publicOrigin?: string;
   /** local sink instead of the HTTP endpoint (self-hosted / dogfooding) */
   onEvent?: (event: AIBotEvent) => void | Promise<unknown>;
+  /**
+   * Optional: return the crawler IP when the runtime can do better than
+   * headers — e.g. `req.socket.remoteAddress` on a directly-exposed Node
+   * server (no reverse proxy in front). Takes precedence over the header
+   * chain.
+   */
+  getClientIp?: (request: Request) => string | null;
 };
 
 type BotSpec = { re: RegExp; agent: string; category: AIBotCategory };
@@ -72,11 +79,36 @@ const INTERNAL_RE = /^\/(api|_app|hit|event|beat|log|mcp|favicon\.ico|health)\b/
 /** Crawler-facing documents worth tracking even though they are "files". */
 const BOT_DOCS = /\/(robots\.txt|llms\.txt|llms-full\.txt|sitemap\.xml)$/i;
 
+/**
+ * Best client IP for range verification. `cf-connecting-ip` is authoritative
+ * on Cloudflare (clients cannot forge it); elsewhere the LAST x-forwarded-for
+ * hop is the least-spoofable signal.
+ */
+/**
+ * Best client IP for range verification, across platforms. Ordered:
+ * platform-authoritative headers first, then the least-spoofable proxy hop.
+ */
+const IP_HEADERS = [
+  "cf-connecting-ip", // Cloudflare (set by the edge, cannot be forged)
+  "true-client-ip", // Akamai / Cloudflare enterprise
+  "x-client-ip", // generic LB
+  "fly-client-ip", // Fly.io
+  "fastly-client-ip", // Fastly
+  "x-real-ip", // nginx / Caddy
+  "x-forwarded-for", // Vercel, everyone else — LAST hop is closest to you
+];
+
 function firstForwardedIp(request: Request): string | null {
-  const xff = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip");
-  if (!xff) return null;
-  const first = xff.split(",")[0]?.trim();
-  return first || null;
+  for (const h of IP_HEADERS) {
+    const v = request.headers.get(h);
+    if (!v?.trim()) continue;
+    if (h === "x-forwarded-for") {
+      const hops = v.split(",").map((s) => s.trim()).filter(Boolean);
+      return hops[hops.length - 1] ?? null;
+    }
+    return v.trim();
+  }
+  return null;
 }
 
 /** Local pre-filter: is this request worth reporting? */
@@ -132,7 +164,7 @@ export async function trackAIBotRequest(
     hostname: originOf(request, opts) || null,
     ua: ua.slice(0, 200),
     status: 0,
-    crawlerIp: firstForwardedIp(request),
+    crawlerIp: opts.getClientIp?.(request) ?? firstForwardedIp(request),
     ts: Date.now(),
   };
   await deliver(event, opts, context);
@@ -190,7 +222,7 @@ export async function trackAIBotResponse(
     hostname: originOf(request, opts) || null,
     ua: ua.slice(0, 200),
     status: response.status,
-    crawlerIp: firstForwardedIp(request),
+    crawlerIp: opts.getClientIp?.(request) ?? firstForwardedIp(request),
     ts: Date.now(),
   };
   await deliver(event, opts, context);
