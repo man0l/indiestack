@@ -132,8 +132,8 @@ export async function listVercelTeams(token: string): Promise<Array<{ id: string
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
-/** Vercel project id -> log source id. */
-export type VercelLogMap = Record<string, { source: string; team: string | null }>;
+/** Vercel project id -> log source id. `quiet` keeps only warn+error (drops info chatter). */
+export type VercelLogMap = Record<string, { source: string; team: string | null; quiet: boolean }>;
 
 export async function getVercelMapping(env: Env): Promise<VercelLogMap> {
   const raw = await getSetting(env.DB, "vercel_log_sources");
@@ -144,10 +144,16 @@ export async function getVercelMapping(env: Env): Promise<VercelLogMap> {
     const out: VercelLogMap = {};
     for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
       if (typeof k !== "string" || !k) continue;
-      if (typeof v === "string" && v) out[k.slice(0, 80)] = { source: v, team: null };
+      if (typeof v === "string" && v) out[k.slice(0, 80)] = { source: v, team: null, quiet: false };
       else if (v && typeof v === "object" && typeof (v as { source?: unknown }).source === "string") {
-        const vv = v as { source: string; team?: unknown };
-        if (vv.source) out[k.slice(0, 80)] = { source: vv.source, team: typeof vv.team === "string" ? vv.team : null };
+        const vv = v as { source: string; team?: unknown; quiet?: unknown };
+        if (vv.source) {
+          out[k.slice(0, 80)] = {
+            source: vv.source,
+            team: typeof vv.team === "string" ? vv.team : null,
+            quiet: vv.quiet === true,
+          };
+        }
       }
     }
     return out;
@@ -164,8 +170,9 @@ export async function setVercelMapping(env: Env, mapping: Record<string, unknown
     if (typeof k !== "string" || !k) continue;
     const source = typeof v === "string" ? v : (v as { source?: unknown })?.source;
     const team = typeof v === "object" && v !== null ? (v as { team?: unknown }).team : null;
+    const quiet = typeof v === "object" && v !== null && (v as { quiet?: unknown }).quiet === true;
     if (typeof source === "string" && ids.has(source)) {
-      clean[k.slice(0, 80)] = { source, team: typeof team === "string" && team ? team : null };
+      clean[k.slice(0, 80)] = { source, team: typeof team === "string" && team ? team : null, quiet };
     }
   }
   await setSetting(env.DB, "vercel_log_sources", JSON.stringify(clean));
@@ -468,8 +475,8 @@ export async function scanDeploys(env: Env, now: number): Promise<DeployStats> {
   return { scanned: targets.length, alerts };
 }
 
-/** repo (owner/name) -> log source. Mirrors the Vercel mapping shape. */
-export type GithubLogMap = Record<string, { source: string }>;
+/** repo (owner/name) -> log source. `quiet` keeps only warn+error (drops info chatter). */
+export type GithubLogMap = Record<string, { source: string; quiet: boolean }>;
 
 export async function getGithubMapping(env: Env): Promise<GithubLogMap> {
   const raw = await getSetting(env.DB, "github_log_sources");
@@ -480,10 +487,10 @@ export async function getGithubMapping(env: Env): Promise<GithubLogMap> {
     const out: GithubLogMap = {};
     for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
       if (typeof k !== "string" || !k || !k.includes("/")) continue;
-      if (typeof v === "string" && v) out[k.slice(0, 100)] = { source: v };
+      if (typeof v === "string" && v) out[k.slice(0, 100)] = { source: v, quiet: false };
       else if (v && typeof v === "object" && typeof (v as { source?: unknown }).source === "string") {
-        const vv = v as { source: string };
-        if (vv.source) out[k.slice(0, 100)] = { source: vv.source };
+        const vv = v as { source: string; quiet?: unknown };
+        if (vv.source) out[k.slice(0, 100)] = { source: vv.source, quiet: vv.quiet === true };
       }
     }
     return out;
@@ -499,8 +506,9 @@ export async function setGithubMapping(env: Env, mapping: Record<string, unknown
   for (const [k, v] of Object.entries(mapping).slice(0, 20)) {
     if (typeof k !== "string" || !k || !k.includes("/")) continue;
     const source = typeof v === "string" ? v : (v as { source?: unknown })?.source;
+    const quiet = typeof v === "object" && v !== null && (v as { quiet?: unknown }).quiet === true;
     if (typeof source === "string" && ids.has(source)) {
-      clean[k.slice(0, 100)] = { source };
+      clean[k.slice(0, 100)] = { source, quiet };
     }
   }
   await setSetting(env.DB, "github_log_sources", JSON.stringify(clean));
@@ -651,20 +659,25 @@ export async function syncGithubLogs(env: Env, now: number): Promise<number> {
   let synced = 0;
   let firstError: string | null = null;
   for (const repo of repos) {
-    const sid = mapping[repo]?.source;
+    const pref = mapping[repo];
+    const sid = typeof pref === "string" ? pref : pref?.source;
     if (!sid) continue;
+    const quiet = typeof pref === "object" && pref !== null && pref.quiet === true;
     const { events, error } = await queryGithubActionsLogs(env, repo, GITHUB_LOG_CAP).catch(() => ({
       events: [],
       error: "failed" as string | null,
     }));
     if (error && !firstError) firstError = `${repo.slice(0, 40)}: ${error}`;
+    // Tag every line with its repo so mixed sources stay readable; quiet
+    // keeps warn+error (drops info chatter and green-run markers).
+    const kept = quiet ? events.filter((e) => e.level !== "info") : events;
     synced += await putLogEvents(
       env,
       sid,
-      events.map((e) => ({
+      kept.map((e) => ({
         ts: e.ts,
         level: e.level,
-        message: e.message,
+        message: e.message.replace(/^\[github\] /, `[github:${repo}] `),
         data: { repo, message: e.message },
       })),
     ).catch(() => 0);
@@ -696,10 +709,13 @@ export async function syncVercelLogs(env: Env, now: number): Promise<number> {
   const last = Number((await getSetting(env.DB, "vercel_log_poll_at")) ?? 0);
   if (now - last < VERCEL_LOG_EVERY_MS) return 0;
   const teamRows = await env.DB.prepare(
-    "SELECT project, team FROM deploy_targets WHERE provider = 'vercel'",
-  ).all<{ project: string | null; team: string | null }>();
+    "SELECT project, team, name FROM deploy_targets WHERE provider = 'vercel'",
+  ).all<{ project: string | null; team: string | null; name: string | null }>();
   const teamByProject = new Map(
     (teamRows.results ?? []).filter((r) => r.project).map((r) => [r.project as string, r.team]),
+  );
+  const nameByProject = new Map(
+    (teamRows.results ?? []).filter((r) => r.project).map((r) => [r.project as string, r.name ?? r.project as string]),
   );
   let synced = 0;
   let firstError: string | null = null;
@@ -707,6 +723,8 @@ export async function syncVercelLogs(env: Env, now: number): Promise<number> {
     const entry = mapping[pid];
     const sid = typeof entry === "string" ? entry : entry?.source;
     if (!sid) continue;
+    const quiet = typeof entry === "object" && entry !== null && entry.quiet === true;
+    const label = (nameByProject.get(pid) ?? pid).slice(0, 40);
     const team =
       (typeof entry === "object" && entry !== null ? entry.team : null) ??
       teamByProject.get(pid) ??
@@ -716,14 +734,15 @@ export async function syncVercelLogs(env: Env, now: number): Promise<number> {
       error: "failed" as string | null,
     }));
     if (error && !firstError) firstError = `${pid.slice(0, 16)}: ${error}`;
+    const kept = quiet ? events.filter((e) => e.level !== "info") : events;
     synced += await putLogEvents(
       env,
       sid,
-      events.map((e) => ({
+      kept.map((e) => ({
         ts: e.ts,
         level: e.level,
-        message: `[vercel] ${e.message}`,
-        data: { project: pid, message: e.message },
+        message: `[vercel:${label}] ${e.message}`,
+        data: { project: pid, label, message: e.message },
       })),
     ).catch(() => 0);
   }

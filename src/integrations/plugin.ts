@@ -278,11 +278,30 @@ export const integrations: Plugin = {
     const disconnect = path.match(/^\/admin\/deploys\/(github|vercel|cloudflare)\/disconnect$/);
     if (disconnect && method === "POST") {
       const p = disconnect[1];
+      // Opt-in from the disconnect confirmation: also pause this provider's
+      // targets so they stop alerting instead of sitting there orphaned.
+      let disable = false;
+      const ct = request.headers.get("content-type") ?? "";
+      if (ct.includes("application/json")) {
+        const body = (await request.json().catch(() => null)) as { disable_targets?: unknown } | null;
+        disable = body?.disable_targets === true || body?.disable_targets === 1 || body?.disable_targets === "1";
+      } else if (ct.includes("form-")) {
+        const form = await request.formData().catch(() => null);
+        const v = form?.get("disable_targets");
+        disable = v === "1" || v === "on" || v === "true";
+      }
+      let disabled = 0;
+      if (disable) {
+        const r = await env.DB.prepare(
+          "UPDATE deploy_targets SET enabled = 0 WHERE provider = ? AND enabled = 1",
+        ).bind(p).run();
+        disabled = r.meta?.changes ?? 0;
+      }
       await env.DB.batch([
         env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(`${p}_token`),
         env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(`${p}_user`),
       ]);
-      return jsonOk("disconnected");
+      return jsonOk(disabled ? `disconnected · disabled ${disabled} ${p} target(s)` : "disconnected");
     }
 
     if (path === "/admin/deploys/targets" && method === "POST") {

@@ -13,6 +13,7 @@
   import CheckIcon from '@lucide/svelte/icons/check';
   import SearchSelect from './SearchSelect.svelte';
   import ConfirmDelete from './ConfirmDelete.svelte';
+  import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   import * as Alert from '$lib/components/ui/alert';
@@ -234,6 +235,24 @@ import { Input } from '$lib/components/ui/input';
 
   function toggleSelect(name: string) {
     selected = selected.includes(name) ? selected.filter((s) => s !== name) : [...selected, name];
+  }
+
+  // Disconnect confirmation: orphaned targets would sit there alerting on
+  // stale state, so offer to disable this provider's tracking too.
+  let disconnectAsk: { provider: 'github' | 'vercel' | 'cloudflare'; disable: boolean } | null = $state(null);
+  let disconnectOpen = $state(false);
+  const providerNoun = (p: string) => (p === 'github' ? 'repo' : p === 'vercel' ? 'project' : 'worker');
+  const enabledCount = (p: string) => targets.filter((t) => t.provider === p && t.enabled).length;
+  function askDisconnect(p: 'github' | 'vercel' | 'cloudflare') {
+    disconnectAsk = { provider: p, disable: enabledCount(p) > 0 };
+    disconnectOpen = true;
+  }
+  async function confirmDisconnect() {
+    if (!disconnectAsk) return;
+    const { provider, disable } = disconnectAsk;
+    disconnectOpen = false;
+    disconnectAsk = null;
+    await api(`/admin/deploys/${provider}/disconnect`, { disable_targets: disable });
   }
 
   function selectAllVisible() {
@@ -523,7 +542,7 @@ import { Input } from '$lib/components/ui/input';
     <div class="mb-2 flex items-center gap-2 text-sm font-semibold"><GitBranchIcon /> GitHub</div>
     {#if github.connected}
       <p class="mb-3 text-xs text-muted-foreground">connected{github.who ? ` as ${github.who}` : ''}</p>
-      <Button variant="ghost" onclick={() => api('/admin/deploys/github/disconnect')} disabled={busy !== ''}>
+      <Button variant="ghost" onclick={() => askDisconnect('github')} disabled={busy !== ''}>
         <span class="inline-flex items-center gap-1.5"><Link2OffIcon data-icon="inline-start" /> disconnect</span>
       </Button>
     {:else}
@@ -546,7 +565,7 @@ import { Input } from '$lib/components/ui/input';
     <div class="mb-2 flex items-center gap-2 text-sm font-semibold"><RocketIcon /> Vercel</div>
     {#if vercel.connected}
       <p class="mb-3 text-xs text-muted-foreground">connected{vercel.who ? ` as ${vercel.who}` : ''}</p>
-      <Button variant="ghost" onclick={() => api('/admin/deploys/vercel/disconnect')} disabled={busy !== ''}>
+      <Button variant="ghost" onclick={() => askDisconnect('vercel')} disabled={busy !== ''}>
         <span class="inline-flex items-center gap-1.5"><Link2OffIcon data-icon="inline-start" /> disconnect</span>
       </Button>
     {:else}
@@ -568,7 +587,7 @@ import { Input } from '$lib/components/ui/input';
     <div class="mb-2 flex items-center gap-2 text-sm font-semibold"><CloudIcon /> Cloudflare</div>
     {#if cloudflare.connected}
       <p class="mb-3 text-xs text-muted-foreground">connected{cloudflare.who ? ` · ${cloudflare.who}` : ''} · pick workers for logs on the <a class="text-primary underline" href="/admin/p/explorer">logs page</a></p>
-      <Button variant="ghost" onclick={() => api('/admin/deploys/cloudflare/disconnect')} disabled={busy !== ''}>
+      <Button variant="ghost" onclick={() => askDisconnect('cloudflare')} disabled={busy !== ''}>
         <span class="inline-flex items-center gap-1.5"><Link2OffIcon data-icon="inline-start" /> disconnect</span>
       </Button>
     {:else}
@@ -588,3 +607,28 @@ import { Input } from '$lib/components/ui/input';
 </div>
   </Card.Content>
 </Card.Root>
+
+<AlertDialog.Root bind:open={disconnectOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Disconnect {disconnectAsk?.provider ?? ''}?</AlertDialog.Title>
+      <AlertDialog.Description>
+        {#if disconnectAsk && enabledCount(disconnectAsk.provider) > 0}
+          {enabledCount(disconnectAsk.provider)} tracked {providerNoun(disconnectAsk.provider)}{enabledCount(disconnectAsk.provider) === 1 ? ' is' : 's are'} still using this token. Without it their checks go stale — disable their tracking too?
+        {:else}
+          The token is revoked. No active targets depend on it.
+        {/if}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    {#if disconnectAsk && enabledCount(disconnectAsk.provider) > 0}
+      <label class="flex cursor-pointer items-center gap-2 text-sm">
+        <input type="checkbox" bind:checked={disconnectAsk.disable} class="size-4 accent-current" />
+        Also disable tracking for {enabledCount(disconnectAsk.provider)} {providerNoun(disconnectAsk.provider)}{enabledCount(disconnectAsk.provider) === 1 ? '' : 's'}
+      </label>
+    {/if}
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <Button onclick={confirmDisconnect} disabled={busy !== ''}>Disconnect</Button>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

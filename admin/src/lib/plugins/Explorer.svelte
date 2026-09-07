@@ -17,7 +17,7 @@
   import CloudIcon from '@lucide/svelte/icons/cloud';
   import SearchSelect from './SearchSelect.svelte';
 
-  type LogEvent = { key: string; ts: number; level: string | null; message: string; data: unknown };
+  type LogEvent = { key: string; ts: number; level: string | null; message: string; data: unknown; source_id?: string; source_name?: string };
 
   let events: LogEvent[] = $state([]);
   let sources: Array<{ id: string; name: string }> = $state([]);
@@ -47,7 +47,7 @@
   let vLoading = $state(false);
   let ghConnected = $state(false);
   let ghRepos: Array<{ full_name: string; private: boolean; pushed_at: string }> = $state([]);
-  let ghMapping: Record<string, { source: string }> = $state({});
+  let ghMapping: Record<string, { source: string; quiet?: boolean }> = $state({});
   let ghPickRepo = $state('');
   let ghPickSource = $state('');
   let ghSync: { at: number; synced: number; error: string | null } | null = $state(null);
@@ -112,16 +112,21 @@
     }
   }
 
-  type GhMap = Record<string, { source: string }>;
+  type GhMap = Record<string, { source: string; quiet: boolean }>;
 
-  async function saveGhMapping(repo: string, sourceId: string) {
+  const ghQuiet = (entry: { quiet?: boolean } | string): boolean =>
+    typeof entry === 'string' ? false : (entry.quiet ?? false);
+
+  async function saveGhMapping(repo: string, sourceId: string, pref?: { quiet?: boolean }) {
     cfError = '';
     const next: GhMap = {};
     for (const [k, v] of Object.entries(ghMapping)) {
-      next[k] = typeof v === 'string' ? { source: v } : { source: v.source };
+      next[k] = typeof v === 'string' ? { source: v, quiet: false } : { source: v.source, quiet: v.quiet ?? false };
     }
-    if (sourceId) next[repo] = { source: sourceId };
-    else delete next[repo];
+    if (sourceId) {
+      const prev = next[repo];
+      next[repo] = { source: sourceId, quiet: pref?.quiet ?? prev?.quiet ?? false };
+    } else delete next[repo];
     const r = await fetch('/admin/github/mapping', {
       method: 'POST',
       body: JSON.stringify({ mappings: next }),
@@ -195,27 +200,40 @@
     }
   }
 
-  type VMap = Record<string, { source: string; team: string | null }>;
+  type VMap = Record<string, { source: string; team: string | null; quiet: boolean }>;
 
-  const vTeamLabel = (entry: { source: string; team: string | null } | string): string | null => {
+  const vTeamLabel = (entry: { source: string; team: string | null; quiet?: boolean } | string): string | null => {
     const t = typeof entry === 'string' ? null : (entry.team ?? null);
     if (!t) return null;
     return vTeams.find((x) => x.id === t)?.slug ?? `${t.slice(0, 12)}…`;
   };
 
-  async function saveVMapping(project: string, sourceId: string) {
+  const vQuiet = (entry: { quiet?: boolean } | string): boolean =>
+    typeof entry === 'string' ? false : (entry.quiet ?? false);
+
+  async function saveVMapping(project: string, sourceId: string, pref?: { quiet?: boolean }) {
     cfError = '';
-    if (sourceId && !vTeam) {
-      cfError = 'pick a team first — scope is required for mapping';
-      return;
-    }
     const next: VMap = {};
     for (const [pid, v] of Object.entries(vMapping)) {
       next[pid] =
-        typeof v === 'string' ? { source: v, team: null } : { source: v.source, team: v.team ?? null };
+        typeof v === 'string'
+          ? { source: v, team: null, quiet: false }
+          : { source: v.source, team: v.team ?? null, quiet: v.quiet ?? false };
     }
-    if (sourceId) next[project] = { source: sourceId, team: vTeam === '__personal' ? null : vTeam };
-    else delete next[project];
+    const prev = next[project];
+    // New mappings need a team scope; quiet-toggles on existing ones reuse the stored scope.
+    if (sourceId && !vTeam && !prev) {
+      cfError = 'pick a team first — scope is required for mapping';
+      return;
+    }
+    if (sourceId) {
+      const team = vTeam ? (vTeam === '__personal' ? null : vTeam) : (prev?.team ?? null);
+      next[project] = {
+        source: sourceId,
+        team,
+        quiet: pref?.quiet ?? prev?.quiet ?? false,
+      };
+    } else delete next[project];
     const r = await fetch('/admin/vercel/mapping', {
       method: 'POST',
       body: JSON.stringify({ mappings: next }),
@@ -376,6 +394,15 @@
                 <span class="shrink-0 truncate font-medium">{sources.find((s) => s.id === vsid)?.name ?? vsid}</span>
                 <button
                   type="button"
+                  title={vQuiet(entry) ? 'Quiet: only warnings + errors sync — click to include info chatter' : 'Noisy: all levels sync — click to keep only warnings + errors'}
+                  aria-pressed={vQuiet(entry)}
+                  class="shrink-0 rounded-md border px-1.5 py-0.5 {vQuiet(entry) ? 'border-border text-muted-foreground' : 'border-border text-foreground'}"
+                  onclick={() => saveVMapping(pid, vsid, { quiet: !vQuiet(entry) })}
+                >
+                  {vQuiet(entry) ? 'quiet' : 'noisy'}
+                </button>
+                <button
+                  type="button"
                   title={`unmap ${pid}`}
                   class="shrink-0 rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                   onclick={() => saveVMapping(pid, '')}
@@ -445,6 +472,15 @@
                 <span class="min-w-0 flex-1 truncate font-mono">{repo}</span>
                 <span class="shrink-0 text-muted-foreground">→</span>
                 <span class="shrink-0 truncate font-medium">{sources.find((s) => s.id === gsid)?.name ?? gsid}</span>
+                <button
+                  type="button"
+                  title={ghQuiet(entry) ? 'Quiet: only warnings + errors sync — click to include info chatter' : 'Noisy: all levels sync — click to keep only warnings + errors'}
+                  aria-pressed={ghQuiet(entry)}
+                  class="shrink-0 rounded-md border px-1.5 py-0.5 {ghQuiet(entry) ? 'border-border text-muted-foreground' : 'border-border text-foreground'}"
+                  onclick={() => saveGhMapping(repo, gsid, { quiet: !ghQuiet(entry) })}
+                >
+                  {ghQuiet(entry) ? 'quiet' : 'noisy'}
+                </button>
                 <button
                   type="button"
                   title={`unmap ${repo}`}
@@ -557,6 +593,7 @@
             >
               <span class="shrink-0 text-xs text-muted-foreground tabular-nums">{time(e.ts)}</span>
               {#if e.level}<Badge variant={lvlVariant(e.level)}>{e.level}</Badge>{/if}
+              <span class="shrink-0 truncate text-xs text-muted-foreground">{e.source_name ?? sources.find((s) => s.id === e.source_id)?.name ?? ''}</span>
               <span class="min-w-0 flex-1 basis-48 truncate text-sm">{e.message}</span>
             </button>
             {#if expanded[e.key]}
