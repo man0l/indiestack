@@ -529,8 +529,8 @@ import { Input } from '$lib/components/ui/input';
     {:else}
       <p class="mb-3 text-xs text-muted-foreground">
         <a class="text-primary underline" target="_blank" rel="noopener"
-          href="https://github.com/settings/personal-access-tokens/new?name=IndieStack%20deploys&description=Read-only%20commit%20tracking%20for%20IndieStack&permissions%5Bcontents%5D=read&expiration=none">create a pre-filled read-only token ↗</a>
-        — Contents: read-only, no expiration. Public repos work without a token (rate-shared).
+          href="https://github.com/settings/personal-access-tokens/new?name=IndieStack%20deploys&description=Read-only%20commit%20and%20Actions-log%20tracking%20for%20IndieStack&contents=read&actions=read&expires_in=none">create a pre-filled read-only token ↗</a>
+        — Contents: read-only + Actions: read-only, no expiration. Public repos work without a token (rate-shared).
       </p>
       <form class="flex flex-col gap-2 sm:flex-row" onsubmit={(e) => { e.preventDefault();
         const fd = new FormData(e.currentTarget as HTMLFormElement);

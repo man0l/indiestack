@@ -85,6 +85,24 @@ async function lastVercelSync(env: Env): Promise<{ at: number; synced: number; e
   }
 }
 
+async function lastGithubSync(env: Env): Promise<{ at: number; synced: number; error: string | null } | null> {
+  const raw = await env.DB.prepare("SELECT value FROM settings WHERE key = 'github_log_last'")
+    .first<{ value: string }>()
+    .then((r) => r?.value ?? null)
+    .catch(() => null);
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as { at?: unknown; synced?: unknown; error?: unknown };
+    return {
+      at: typeof o.at === "number" ? o.at : 0,
+      synced: typeof o.synced === "number" ? o.synced : 0,
+      error: typeof o.error === "string" ? o.error : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function handle(request: Request, env: Env, _execCtx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const ctx = {
@@ -187,6 +205,31 @@ async function handle(request: Request, env: Env, _execCtx?: ExecutionContext): 
       teams: lists?.teams ?? [],
       mapping: await getVercelMapping(env),
       sync: await lastVercelSync(env),
+      error,
+    });
+  }
+  if (ctx.path === "/api/githubrepos" && ctx.method === "GET") {
+    const gate = await gateAdmin(request, env);
+    if (gate) return gate;
+    const { getGithubMapping, listUserRepos } = await import("./integrations/index");
+    const token = await env.DB.prepare("SELECT value FROM settings WHERE key = 'github_token'")
+      .first<{ value: string }>()
+      .then((r) => r?.value ?? null);
+    if (!token) {
+      return Response.json({ connected: false, repos: [], mapping: {}, sync: null });
+    }
+    let repos: Array<{ full_name: string; private: boolean; pushed_at: string }> = [];
+    let error: string | null = null;
+    try {
+      repos = await listUserRepos(token);
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    return Response.json({
+      connected: true,
+      repos,
+      mapping: await getGithubMapping(env),
+      sync: await lastGithubSync(env),
       error,
     });
   }

@@ -18,10 +18,11 @@ export const logs: Plugin = {
     return `${n?.n ?? 0}/10 logs`;
   },
   async adminSection(ctx: SectionCtx) {
-    const [sources, cfMapping, vMapping] = await Promise.all([
+    const [sources, cfMapping, vMapping, gMapping] = await Promise.all([
       listLogSources(ctx.env.DB),
       import("../cloudflare/index").then((m) => m.getCfMapping(ctx.env)),
       import("../integrations/index").then((m) => m.getVercelMapping(ctx.env)),
+      import("../integrations/index").then((m) => m.getGithubMapping(ctx.env)),
     ]);
     const names = new Map(sources.map((s) => [s.id, s.name]));
     const mapped = [
@@ -32,6 +33,10 @@ export const logs: Plugin = {
       ...Object.entries(vMapping).map(([project, entry]) => {
         const sid = typeof entry === "string" ? entry : entry?.source ?? project;
         return { worker: `vercel:${project}`, source: names.get(sid) ?? sid };
+      }),
+      ...Object.entries(gMapping).map(([repo, entry]) => {
+        const sid = typeof entry === "string" ? entry : entry?.source ?? repo;
+        return { worker: `github:${repo}`, source: names.get(sid) ?? sid };
       }),
     ];
     return adminLogs(sources, ctx.origin, mapped);

@@ -69,9 +69,10 @@ export function adminDeploys(
   const githubTokenUrl =
     "https://github.com/settings/personal-access-tokens/new" +
     "?name=IndieStack%20deploys" +
-    "&description=Read-only%20commit%20tracking%20for%20IndieStack" +
-    "&permissions%5Bcontents%5D=read" +
-    "&expiration=none";
+    "&description=Read-only%20commit%20and%20Actions-log%20tracking%20for%20IndieStack" +
+    "&contents=read" +
+    "&actions=read" +
+    "&expires_in=none";
   const vercelTokenUrl = "https://vercel.com/account/tokens";
   const cloudflareTokenUrl =
     "https://dash.cloudflare.com/profile/api-tokens" +
@@ -124,7 +125,7 @@ export function adminDeploys(
       githubTokenUrl,
       "create a pre-filled read-only token",
       github,
-      "The link pre-selects <b>Contents: read-only</b> and <b>no expiration</b> — nothing expires, nothing else is granted. Prefer 30/90 days? Change Expiration in the form. Public repos work without any token (just slower); disconnect here revokes instantly.",
+      "The link pre-selects <b>Contents: read-only</b> + <b>Actions: read-only</b> and <b>no expiration</b> — commit tracking needs Contents, Actions-log sync needs Actions. Prefer 30/90 days? Change Expiration in the form. Public repos work without any token (just slower); disconnect here revokes instantly.",
     )}
     ${addGithub}
     ${connect(

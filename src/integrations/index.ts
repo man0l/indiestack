@@ -468,6 +468,214 @@ export async function scanDeploys(env: Env, now: number): Promise<DeployStats> {
   return { scanned: targets.length, alerts };
 }
 
+/** repo (owner/name) -> log source. Mirrors the Vercel mapping shape. */
+export type GithubLogMap = Record<string, { source: string }>;
+
+export async function getGithubMapping(env: Env): Promise<GithubLogMap> {
+  const raw = await getSetting(env.DB, "github_log_sources");
+  if (!raw) return {};
+  try {
+    const o = JSON.parse(raw) as unknown;
+    if (!o || typeof o !== "object" || Array.isArray(o)) return {};
+    const out: GithubLogMap = {};
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+      if (typeof k !== "string" || !k || !k.includes("/")) continue;
+      if (typeof v === "string" && v) out[k.slice(0, 100)] = { source: v };
+      else if (v && typeof v === "object" && typeof (v as { source?: unknown }).source === "string") {
+        const vv = v as { source: string };
+        if (vv.source) out[k.slice(0, 100)] = { source: vv.source };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function setGithubMapping(env: Env, mapping: Record<string, unknown>): Promise<GithubLogMap> {
+  const valid = await env.DB.prepare("SELECT id FROM log_sources").all<{ id: string }>();
+  const ids = new Set((valid.results ?? []).map((r) => r.id));
+  const clean: GithubLogMap = {};
+  for (const [k, v] of Object.entries(mapping).slice(0, 20)) {
+    if (typeof k !== "string" || !k || !k.includes("/")) continue;
+    const source = typeof v === "string" ? v : (v as { source?: unknown })?.source;
+    if (typeof source === "string" && ids.has(source)) {
+      clean[k.slice(0, 100)] = { source };
+    }
+  }
+  await setSetting(env.DB, "github_log_sources", JSON.stringify(clean));
+  return clean;
+}
+
+export type GithubActionEvent = { ts: number; level: string; message: string; repo: string };
+
+function classifyGithubLevel(text: string): string {
+  if (/warn/i.test(text)) return "warn";
+  if (/err(or)?|fail(ed|ure)?|fatal|exception|timed_?out|cancel[l]?ed|denied|not found|E[A-Z]+|panic/i.test(text)) return "error";
+  return "info";
+}
+
+type GhRun = {
+  id?: number;
+  name?: string;
+  display_title?: string;
+  head_branch?: string;
+  head_sha?: string;
+  run_number?: number;
+  status?: string;
+  conclusion?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  html_url?: string;
+};
+
+type GhJob = {
+  id?: number;
+  name?: string;
+  conclusion?: string | null;
+  started_at?: string;
+  completed_at?: string;
+  html_url?: string;
+};
+
+function githubActionsError(status: number, msg: string): string {
+  if (status === 401 || status === 403) {
+    if (/resource not accessible|actions/i.test(msg)) return "token rejected (needs Actions: read)";
+    return "token rejected";
+  }
+  if (status === 404) return "repo not found or Actions disabled";
+  return trunc(msg || `github ${status}`, 160);
+}
+
+/** Recent Actions runs of one repo, newest first — run markers plus failed-job log lines. */
+export async function queryGithubActionsLogs(
+  env: Env,
+  repo: string,
+  limit = 25,
+): Promise<{ events: GithubActionEvent[]; error: string | null }> {
+  const token = await getSetting(env.DB, "github_token");
+  if (!token) return { events: [], error: "github not connected" };
+  if (!repo.includes("/")) return { events: [], error: "bad repo (owner/repo)" };
+  const base = `https://api.github.com/repos/${repo}`;
+  let runs: GhRun[];
+  try {
+    const res = await fetch(`${base}/actions/runs?per_page=5`, { headers: jsonHeaders(token) });
+    if (!res.ok) return { events: [], error: githubActionsError(res.status, await readError(res)) };
+    const json = (await res.json()) as { workflow_runs?: GhRun[] };
+    runs = Array.isArray(json.workflow_runs) ? json.workflow_runs : [];
+  } catch (err) {
+    return { events: [], error: trunc(String(err), 160) };
+  }
+  if (!runs.length) return { events: [], error: null };
+  const events: GithubActionEvent[] = [];
+  const failed = runs.filter((r) =>
+    ["failure", "timed_out", "cancelled", "action_required", "stale"].includes(String(r.conclusion ?? "")),
+  );
+  for (const r of runs.slice(0, 5)) {
+    const conclusion = String(r.conclusion ?? r.status ?? "unknown");
+    const title = String(r.display_title ?? r.name ?? "workflow").slice(0, 120);
+    events.push({
+      ts: (r.updated_at && Date.parse(r.updated_at)) || (r.created_at && Date.parse(r.created_at)) || Date.now(),
+      level: /fail|timed_out|cancelled|action_required|stale/i.test(conclusion) ? "error" : "info",
+      message: `[github] ${r.name ?? "workflow"} #${r.run_number ?? r.id} ${conclusion} · ${r.head_branch ?? ""} ${(r.head_sha ?? "").slice(0, 7)} ${title}`.slice(0, 300),
+      repo,
+    });
+  }
+  // Expand at most 2 failed runs: failed jobs -> log text tail. Keeps the
+  // subrequest count bounded (1 runs + 2 jobs + 2-4 logs per repo per sync).
+  for (const r of failed.slice(0, 2)) {
+    if (!r.id || events.length >= limit) break;
+    let jobs: GhJob[];
+    try {
+      const res = await fetch(`${base}/actions/runs/${r.id}/jobs?per_page=20`, { headers: jsonHeaders(token) });
+      if (!res.ok) continue;
+      const json = (await res.json()) as { jobs?: GhJob[] };
+      jobs = Array.isArray(json.jobs) ? json.jobs : [];
+    } catch {
+      continue;
+    }
+    const bad = jobs.filter((j) => j.conclusion && j.conclusion !== "success").slice(0, 2);
+    const targets = bad.length ? bad : jobs.filter((j) => j.id).slice(0, 1);
+    for (const j of targets) {
+      if (!j.id || events.length >= limit) break;
+      try {
+        const res = await fetch(`${base}/actions/jobs/${j.id}/logs`, {
+          headers: { ...jsonHeaders(token), accept: "text/plain" },
+          redirect: "follow",
+        });
+        if (!res.ok) continue;
+        const text = await res.text().catch(() => "");
+        if (!text) continue;
+        const lines = text.split("\n").slice(-120);
+        // Prefer error/warn lines, then the tail — capped so one repo fills at most `limit`.
+        const interesting = lines.filter((l) => /err(or)?|fail|fatal|exception|timed_?out|warn|denied|panic/i.test(l));
+        const picked = [...interesting.slice(-12), ...lines.slice(-8)];
+        const seen = new Set<string>();
+        const tsBase = (j.completed_at && Date.parse(j.completed_at)) || (r.updated_at && Date.parse(r.updated_at)) || Date.now();
+        let i = 0;
+        for (const rawLine of picked) {
+          const line = rawLine.replace(/^\d{4}-\d{2}-\d{2}T\S+\s*/, "").trim().slice(0, 280);
+          if (!line || seen.has(line)) continue;
+          seen.add(line);
+          events.push({
+            ts: tsBase - (picked.length - i) * 1000,
+            level: classifyGithubLevel(line),
+            message: `[github] ${r.name ?? "workflow"} ${j.name ?? "job"}: ${line}`.slice(0, 300),
+            repo,
+          });
+          i++;
+          if (events.length >= limit) break;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return { events: events.slice(0, limit), error: null };
+}
+
+const GITHUB_LOG_EVERY_MS = 5 * 60 * 1000;
+const GITHUB_LOG_CAP = 25;
+
+/**
+ * Background sync: pull Actions runs of mapped repos into log_events (D1).
+ * Throttled to every 5 min; the UNIQUE (source_id, ts, message) index makes
+ * re-pulls idempotent, so no per-repo cursors are needed.
+ */
+export async function syncGithubLogs(env: Env, now: number): Promise<number> {
+  const mapping = await getGithubMapping(env);
+  const repos = Object.keys(mapping).slice(0, 5);
+  if (!repos.length) return 0;
+  const last = Number((await getSetting(env.DB, "github_log_poll_at")) ?? 0);
+  if (now - last < GITHUB_LOG_EVERY_MS) return 0;
+  let synced = 0;
+  let firstError: string | null = null;
+  for (const repo of repos) {
+    const sid = mapping[repo]?.source;
+    if (!sid) continue;
+    const { events, error } = await queryGithubActionsLogs(env, repo, GITHUB_LOG_CAP).catch(() => ({
+      events: [],
+      error: "failed" as string | null,
+    }));
+    if (error && !firstError) firstError = `${repo.slice(0, 40)}: ${error}`;
+    synced += await putLogEvents(
+      env,
+      sid,
+      events.map((e) => ({
+        ts: e.ts,
+        level: e.level,
+        message: e.message,
+        data: { repo, message: e.message },
+      })),
+    ).catch(() => 0);
+  }
+  await setSetting(env.DB, "github_log_poll_at", String(now)).catch(() => {});
+  await setSetting(env.DB, "github_log_last", JSON.stringify({ at: now, synced, error: firstError })).catch(
+    () => {},
+  );
+  return synced;
+}
+
 /** JSON for storage on first insert (no history to merge yet). */
 function commitsJson(r: DeployResult): string | null {
   return r.commits?.length ? JSON.stringify(r.commits) : null;

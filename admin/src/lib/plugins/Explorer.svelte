@@ -45,6 +45,13 @@
   let vPickSource = $state('');
   let vSync: { at: number; synced: number; error: string | null } | null = $state(null);
   let vLoading = $state(false);
+  let ghConnected = $state(false);
+  let ghRepos: Array<{ full_name: string; private: boolean; pushed_at: string }> = $state([]);
+  let ghMapping: Record<string, { source: string }> = $state({});
+  let ghPickRepo = $state('');
+  let ghPickSource = $state('');
+  let ghSync: { at: number; synced: number; error: string | null } | null = $state(null);
+  let ghLoading = $state(false);
 
   const time = (ts: number) => new Date(ts).toISOString().slice(5, 16).replace('T', ' ');
   const localTime = (ts: number) => {
@@ -88,9 +95,50 @@
     }
   }
 
+  async function loadGh() {
+    ghLoading = true;
+    try {
+      const r = await fetch('/api/githubrepos');
+      if (!r.ok) return;
+      const j = await r.json();
+      ghConnected = j.connected ?? false;
+      ghRepos = j.repos ?? [];
+      ghMapping = j.mapping ?? {};
+      ghSync = j.sync ?? null;
+    } catch {
+      ghConnected = false;
+    } finally {
+      ghLoading = false;
+    }
+  }
+
+  type GhMap = Record<string, { source: string }>;
+
+  async function saveGhMapping(repo: string, sourceId: string) {
+    cfError = '';
+    const next: GhMap = {};
+    for (const [k, v] of Object.entries(ghMapping)) {
+      next[k] = typeof v === 'string' ? { source: v } : { source: v.source };
+    }
+    if (sourceId) next[repo] = { source: sourceId };
+    else delete next[repo];
+    const r = await fetch('/admin/github/mapping', {
+      method: 'POST',
+      body: JSON.stringify({ mappings: next }),
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+    });
+    const j = await r.json().catch(() => ({ ok: r.ok }));
+    if (!j.ok) cfError = j.error ?? 'failed to save mapping';
+    else {
+      ghMapping = next;
+      await load();
+    }
+  }
+
   onMount(async () => {
     await loadCf();
     await loadV();
+    await loadGh();
     await load();
     ready = true;
   });
@@ -211,7 +259,7 @@
         <Card.Title>log manager</Card.Title>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="ghost" size="sm" onclick={() => { loadCf(); load(); }}>
+        <Button variant="ghost" size="sm" onclick={() => { loadCf(); loadGh(); load(); }}>
           <RefreshCwIcon data-icon="inline-start" /> refresh
         </Button>
       </div>
@@ -378,6 +426,75 @@
               <span class="text-destructive">last sync failed: {vSync.error}</span>
             {:else}
               last sync {vSync.at ? localTime(vSync.at) : 'never'} · {vSync.synced} new event(s)
+            {/if}
+          </p>
+        {/if}
+      </div>
+    {/if}
+    {#if ghConnected}
+      <div class="mb-3 rounded-xl border border-border bg-card p-3">
+        <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>github actions → log names</span>
+        </div>
+        <p class="mb-2 text-xs text-muted-foreground">Maps a repo to a log source; the tick pulls recent workflow runs and failed-job lines every few minutes. Needs a token with Actions: read.</p>
+        {#if Object.keys(ghMapping).length}
+          <div class="mb-2 flex flex-col gap-1">
+            {#each Object.entries(ghMapping) as [repo, entry] (repo)}
+              {@const gsid = typeof entry === 'string' ? entry : entry.source}
+              <div class="flex items-center gap-2 text-xs">
+                <span class="min-w-0 flex-1 truncate font-mono">{repo}</span>
+                <span class="shrink-0 text-muted-foreground">→</span>
+                <span class="shrink-0 truncate font-medium">{sources.find((s) => s.id === gsid)?.name ?? gsid}</span>
+                <button
+                  type="button"
+                  title={`unmap ${repo}`}
+                  class="shrink-0 rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onclick={() => saveGhMapping(repo, '')}
+                  aria-label={`unmap ${repo}`}
+                >✕</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if ghLoading}
+          <p class="text-xs text-muted-foreground">loading repos…</p>
+        {:else if ghRepos.length === 0}
+          <p class="text-xs text-muted-foreground">No repos visible to the token.</p>
+        {:else}
+          <div class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <SearchSelect
+              items={ghRepos.filter((r) => !ghMapping[r.full_name]).map((r) => ({ value: r.full_name, label: r.full_name }))}
+              value={ghPickRepo}
+              placeholder="Pick a repo…"
+              emptyText="All repos mapped."
+              ariaLabel="repo to map"
+              onSelect={(v) => (ghPickRepo = v)}
+            />
+            <SearchSelect
+              items={sources.map((s) => ({ value: s.id, label: s.name }))}
+              value={ghPickSource}
+              placeholder="Pick a log name…"
+              emptyText="Create a log source first."
+              ariaLabel="log source to map to"
+              onSelect={(v) => (ghPickSource = v)}
+            />
+            <Button
+              disabled={!ghPickRepo || !ghPickSource}
+              onclick={() => {
+                saveGhMapping(ghPickRepo, ghPickSource);
+                ghPickRepo = '';
+              }}
+            >
+              <PlusIcon data-icon="inline-start" /> map
+            </Button>
+          </div>
+        {/if}
+        {#if ghSync}
+          <p class="mt-2 text-xs text-muted-foreground">
+            {#if ghSync.error}
+              <span class="text-destructive">last sync failed: {ghSync.error}</span>
+            {:else}
+              last sync {ghSync.at ? localTime(ghSync.at) : 'never'} · {ghSync.synced} new event(s)
             {/if}
           </p>
         {/if}

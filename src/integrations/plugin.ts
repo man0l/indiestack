@@ -14,6 +14,7 @@ import {
   connectVercel,
   resolveVercelProject,
   scanDeploys,
+  syncGithubLogs,
   syncVercelLogs,
 } from "./index";
 import { adminDeploys, statusDeploys } from "./ui";
@@ -84,9 +85,10 @@ export const integrations: Plugin = {
   async tick(env, now) {
     const r = await scanDeploys(env, now);
     const synced = await syncVercelLogs(env, now).catch(() => 0);
+    const ghSynced = await syncGithubLogs(env, now).catch(() => 0);
     const { syncCloudflareLogs } = await import("../cloudflare/index");
     const cfSynced = await syncCloudflareLogs(env, now).catch(() => 0);
-    return { deploys: r.scanned, alerts: r.alerts, vercel_logs: synced, cf_logs: cfSynced };
+    return { deploys: r.scanned, alerts: r.alerts, vercel_logs: synced, github_logs: ghSynced, cf_logs: cfSynced };
   },
   async admin(ctx: RouteCtx) {
     const { path, method, env, request } = ctx;
@@ -387,6 +389,15 @@ export const integrations: Plugin = {
       const saved = await setVercelMapping(env, raw as Record<string, string>);
       const n = Object.keys(saved).length;
       return jsonOk(n ? `${n} project(s) mapped to log sources` : "mapping cleared");
+    }
+
+    if (path === "/admin/github/mapping" && method === "POST") {
+      const { setGithubMapping } = await import("./index");
+      const body = (await request.json().catch(() => null)) as { mappings?: unknown } | null;
+      const raw = body?.mappings && typeof body.mappings === "object" ? body.mappings : {};
+      const saved = await setGithubMapping(env, raw as Record<string, string>);
+      const n = Object.keys(saved).length;
+      return jsonOk(n ? `${n} repo(s) mapped to log sources` : "mapping cleared");
     }
 
     const site = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/site$/);
