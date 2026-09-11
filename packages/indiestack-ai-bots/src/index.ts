@@ -8,7 +8,8 @@
  * truth for provider classification, category, IP verification and the
  * crawler list — so lists update without upgrading this package.
  *
- * Zero dependencies. Non-blocking: uses waitUntil when the runtime offers it.
+ * Zero dependencies. Non-blocking: uses waitUntil when the runtime offers it
+ * (Workers ExecutionContext, Next.js after()), otherwise awaits inline.
  */
 
 export type AIBotCategory = "answer_fetch" | "search_index" | "training" | "ai_crawler";

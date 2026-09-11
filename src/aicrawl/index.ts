@@ -70,31 +70,27 @@ export async function crawlSummary(
   days = 30,
 ): Promise<{ byVendor: CrawlRow[]; topPaths: Array<{ path: string; n: number }>; referrals: Array<{ ref: string; views: number }> }> {
   const sinceDay = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const byVendor = await env.DB.prepare(
-    `SELECT vendor, COUNT(*) AS n, MAX(ts) AS last_ts
-     FROM crawls WHERE site_id = ? AND day >= ? GROUP BY vendor ORDER BY n DESC`,
-  )
-    .bind(siteId, sinceDay)
-    .all<CrawlRow>();
-  const topPaths = await env.DB.prepare(
-    `SELECT path, COUNT(*) AS n FROM crawls WHERE site_id = ? AND day >= ?
-     GROUP BY path ORDER BY n DESC LIMIT 8`,
-  )
-    .bind(siteId, sinceDay)
-    .all<{ path: string; n: number }>();
-  // AI referrals come from the analytics base: hits whose referrer is an AI product.
-  const referrals = await env.DB.prepare(
-    `SELECT ref, COUNT(*) AS views FROM hits
-     WHERE site_id = ? AND day >= ? AND ref IS NOT NULL AND (
-       ${AI_REFERRERS.map((h) => `ref = '${h}' OR ref LIKE '${h}' || '%'`).join(" OR ")}
-     ) GROUP BY ref ORDER BY views DESC LIMIT 8`,
-  )
-    .bind(siteId, sinceDay)
-    .all<{ ref: string; views: number }>();
+  const [byVendor, topPaths, referrals] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT vendor, COUNT(*) AS n, MAX(ts) AS last_ts
+       FROM crawls WHERE site_id = ? AND day >= ? GROUP BY vendor ORDER BY n DESC`,
+    ).bind(siteId, sinceDay),
+    env.DB.prepare(
+      `SELECT path, COUNT(*) AS n FROM crawls WHERE site_id = ? AND day >= ?
+       GROUP BY path ORDER BY n DESC LIMIT 8`,
+    ).bind(siteId, sinceDay),
+    // AI referrals come from the analytics base: hits whose referrer is an AI product.
+    env.DB.prepare(
+      `SELECT ref, COUNT(*) AS views FROM hits
+       WHERE site_id = ? AND day >= ? AND ref IS NOT NULL AND (
+         ${AI_REFERRERS.map((h) => `ref = '${h}' OR ref LIKE '${h}' || '%'`).join(" OR ")}
+       ) GROUP BY ref ORDER BY views DESC LIMIT 8`,
+    ).bind(siteId, sinceDay),
+  ]);
   return {
-    byVendor: byVendor.results ?? [],
-    topPaths: topPaths.results ?? [],
-    referrals: referrals.results ?? [],
+    byVendor: (byVendor.results ?? []) as CrawlRow[],
+    topPaths: (topPaths.results ?? []) as Array<{ path: string; n: number }>,
+    referrals: (referrals.results ?? []) as Array<{ ref: string; views: number }>,
   };
 }
 

@@ -100,28 +100,26 @@ with an **agent token** minted by the owner in \`/admin\`.
 export async function statusSnapshot(env: Env, origin: string): Promise<Record<string, unknown>> {
   const now = Date.now();
   const since = now - 24 * 60 * 60 * 1000;
-  const [monitors, jobs, deploys, incidents, analytics] = await Promise.all([
+  const [monitors, jobs, deploys, incidents] = await env.DB.batch([
     env.DB.prepare(
       `SELECT name, url, status, interval_min, last_status_code, last_latency_ms, last_error, last_check_at
        FROM monitors ORDER BY created_at ASC`,
-    ).all(),
+    ),
     env.DB.prepare(
       `SELECT name, status, interval_min, grace_min, last_beat_at, last_error
        FROM jobs ORDER BY created_at ASC`,
-    ).all(),
+    ),
     env.DB.prepare(
       `SELECT name, provider, repo, project, status, last_detail, last_error, last_check_at
        FROM deploy_targets ORDER BY created_at ASC`,
-    ).all(),
+    ),
     env.DB.prepare(
       `SELECT c.ts, m.name, c.error
        FROM checks c JOIN monitors m ON m.id = c.monitor_id
        WHERE c.ok = 0 AND c.ts >= ? ORDER BY c.ts DESC LIMIT 20`,
-    )
-      .bind(since)
-      .all(),
-    analyticsSummary(env, now, 7),
+    ).bind(since),
   ]);
+  const analytics = await analyticsSummary(env, now, 7);
   const rows = (monitors.results ?? []) as Array<Record<string, unknown>>;
   const up = rows.filter((m) => m.status === "up").length;
   const down = rows.filter((m) => m.status === "down").length;
@@ -141,21 +139,19 @@ export async function statusSnapshot(env: Env, origin: string): Promise<Record<s
 
 async function analyticsSummary(env: Env, now: number, days: number): Promise<unknown> {
   const sinceDay = new Date(now - days * 86400000).toISOString().slice(0, 10);
-  const sites = await env.DB.prepare(
-    "SELECT name FROM analytics_sites WHERE enabled = 1 ORDER BY created_at ASC",
-  ).all<{ name: string }>();
-  const totals = await env.DB.prepare(
-    `SELECT s.name AS site, COUNT(*) AS views, COUNT(DISTINCT h.vid) AS uniques,
-            COUNT(DISTINCT h.path) AS paths
-     FROM hits h JOIN analytics_sites s ON s.id = h.site_id
-     WHERE h.day >= ? GROUP BY s.id ORDER BY views DESC`,
-  )
-    .bind(sinceDay)
-    .all<{ site: string; views: number; uniques: number; paths: number }>();
+  const [sites, totals] = await env.DB.batch([
+    env.DB.prepare("SELECT name FROM analytics_sites WHERE enabled = 1 ORDER BY created_at ASC"),
+    env.DB.prepare(
+      `SELECT s.name AS site, COUNT(*) AS views, COUNT(DISTINCT h.vid) AS uniques,
+              COUNT(DISTINCT h.path) AS paths
+       FROM hits h JOIN analytics_sites s ON s.id = h.site_id
+       WHERE h.day >= ? GROUP BY s.id ORDER BY views DESC`,
+    ).bind(sinceDay),
+  ]);
   return {
     window_days: days,
     note: "uniques are per-day buckets (visitor hash rotates daily)",
-    sites: sites.results?.map((s) => s.name) ?? [],
+    sites: ((sites.results ?? []) as Array<{ name: string }>).map((s) => s.name),
     totals: totals.results ?? [],
   };
 }
@@ -250,22 +246,13 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
   switch (name) {
     case "get_overview": {
       const since = now - 86400000;
-      const [m, j, d, pct] = await Promise.all([
-        env.DB.prepare(
-          "SELECT status, COUNT(*) AS n FROM monitors GROUP BY status",
-        ).all<{ status: string; n: number }>(),
-        env.DB.prepare("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status").all<{
-          status: string;
-          n: number;
-        }>(),
-        env.DB.prepare("SELECT status, COUNT(*) AS n FROM deploy_targets GROUP BY status").all<{
-          status: string;
-          n: number;
-        }>(),
-        env.DB.prepare("SELECT COUNT(*) AS n, SUM(ok) AS ok_n FROM checks WHERE ts >= ?")
-          .bind(since)
-          .first<{ n: number; ok_n: number | null }>(),
+      const [m, j, d, pctRes] = await env.DB.batch([
+        env.DB.prepare("SELECT status, COUNT(*) AS n FROM monitors GROUP BY status"),
+        env.DB.prepare("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"),
+        env.DB.prepare("SELECT status, COUNT(*) AS n FROM deploy_targets GROUP BY status"),
+        env.DB.prepare("SELECT COUNT(*) AS n, SUM(ok) AS ok_n FROM checks WHERE ts >= ?").bind(since),
       ]);
+      const pct = (pctRes.results ?? [])[0] as { n: number; ok_n: number | null } | undefined;
       const byStatus = (rows: Array<{ status: string; n: number }>) => {
         const out: Record<string, number> = {};
         for (const r of rows) out[r.status] = Number(r.n);
@@ -274,9 +261,9 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       const checks = Number(pct?.n) || 0;
       const ok = Number(pct?.ok_n) || 0;
       return {
-        monitors: byStatus(m.results ?? []),
-        heartbeats: byStatus(j.results ?? []),
-        deploys: byStatus(d.results ?? []),
+        monitors: byStatus((m.results ?? []) as Array<{ status: string; n: number }>),
+        heartbeats: byStatus((j.results ?? []) as Array<{ status: string; n: number }>),
+        deploys: byStatus((d.results ?? []) as Array<{ status: string; n: number }>),
         uptime_24h_pct: checks ? Math.round((ok / checks) * 1000) / 10 : null,
       };
     }
@@ -472,10 +459,11 @@ export async function handleMcp(
   await touchToken(env, agent);
 
   if (Array.isArray(body)) {
-    const handled = await Promise.all(
-      body.map((msg) => handleRpcMessage(env, msg as JsonRpcRequest)),
-    );
-    const responses = handled.filter((r): r is JsonRpcResult | JsonRpcErr => r !== null);
+    const responses: Array<JsonRpcResult | JsonRpcErr> = [];
+    for (const msg of body) {
+      const r = await handleRpcMessage(env, msg as JsonRpcRequest);
+      if (r) responses.push(r);
+    }
     if (responses.length === 0) return new Response(null, { status: 202 });
     return Response.json(responses);
   }

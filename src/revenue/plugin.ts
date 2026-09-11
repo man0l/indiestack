@@ -90,10 +90,8 @@ export const revenue: Plugin = {
   deps: ["analytics"],
   adminFooter: "Payments attribute to the first referrer of the identified visitor. Revenue numbers leave your Worker only via your own dashboard links.",
   async adminSection(ctx: SectionCtx) {
-    const [payments, secret] = await Promise.all([
-      paymentsList(ctx.env.DB),
-      getSetting(ctx.env.DB, "stripe_webhook_secret"),
-    ]);
+    const payments = await paymentsList(ctx.env.DB);
+    const secret = await getSetting(ctx.env.DB, "stripe_webhook_secret");
     const rows = payments
       .map(
         (p) => `<div class="row">

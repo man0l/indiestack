@@ -387,48 +387,41 @@ export async function siteStatsById(env: Env, siteId: string, days = 7): Promise
 
 export async function siteStats(env: Env, site: AnalyticsSite, days = 7): Promise<SiteStats> {
   const sinceDay = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const byDay = await env.DB.prepare(
-    `SELECT day, COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
-     FROM hits WHERE site_id = ? AND day >= ? GROUP BY day ORDER BY day ASC`,
-  )
-    .bind(site.id, sinceDay)
-    .all<{ day: string; views: number; uniques: number }>();
-  const totalsRow = await env.DB.prepare(
-    `SELECT COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
-     FROM hits WHERE site_id = ? AND day >= ?`,
-  )
-    .bind(site.id, sinceDay)
-    .first<{ views: number; uniques: number }>();
-  const paths = await env.DB.prepare(
-    `SELECT path, COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
-     FROM hits WHERE site_id = ? AND day >= ? GROUP BY path ORDER BY views DESC LIMIT 8`,
-  )
-    .bind(site.id, sinceDay)
-    .all<{ path: string; views: number; uniques: number }>();
-  const refs = await env.DB.prepare(
-    `SELECT ref, COUNT(*) AS views FROM hits
-     WHERE site_id = ? AND day >= ? AND ref IS NOT NULL AND ref != ''
-     GROUP BY ref ORDER BY views DESC LIMIT 8`,
-  )
-    .bind(site.id, sinceDay)
-    .all<{ ref: string; views: number }>();
-  const countries = await env.DB.prepare(
-    `SELECT country, COUNT(*) AS views FROM hits
-     WHERE site_id = ? AND day >= ? AND country IS NOT NULL
-     GROUP BY country ORDER BY views DESC LIMIT 8`,
-  )
-    .bind(site.id, sinceDay)
-    .all<{ country: string; views: number }>();
+  const [byDay, totalsRes, paths, refs, countries] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT day, COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
+       FROM hits WHERE site_id = ? AND day >= ? GROUP BY day ORDER BY day ASC`,
+    ).bind(site.id, sinceDay),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
+       FROM hits WHERE site_id = ? AND day >= ?`,
+    ).bind(site.id, sinceDay),
+    env.DB.prepare(
+      `SELECT path, COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
+       FROM hits WHERE site_id = ? AND day >= ? GROUP BY path ORDER BY views DESC LIMIT 8`,
+    ).bind(site.id, sinceDay),
+    env.DB.prepare(
+      `SELECT ref, COUNT(*) AS views FROM hits
+       WHERE site_id = ? AND day >= ? AND ref IS NOT NULL AND ref != ''
+       GROUP BY ref ORDER BY views DESC LIMIT 8`,
+    ).bind(site.id, sinceDay),
+    env.DB.prepare(
+      `SELECT country, COUNT(*) AS views FROM hits
+       WHERE site_id = ? AND day >= ? AND country IS NOT NULL
+       GROUP BY country ORDER BY views DESC LIMIT 8`,
+    ).bind(site.id, sinceDay),
+  ]);
+  const totalsRow = (totalsRes.results ?? [])[0] as { views: number; uniques: number } | undefined;
   return {
     site,
     totals: {
       views: Number(totalsRow?.views) || 0,
       uniques: Number(totalsRow?.uniques) || 0,
     },
-    days: byDay.results ?? [],
-    topPaths: paths.results ?? [],
-    topRefs: refs.results ?? [],
-    topCountries: countries.results ?? [],
+    days: (byDay.results ?? []) as Array<{ day: string; views: number; uniques: number }>,
+    topPaths: (paths.results ?? []) as Array<{ path: string; views: number; uniques: number }>,
+    topRefs: (refs.results ?? []) as Array<{ ref: string; views: number }>,
+    topCountries: (countries.results ?? []) as Array<{ country: string; views: number }>,
   };
 }
 

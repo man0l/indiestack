@@ -801,19 +801,19 @@ export async function deployOverview(env: Env): Promise<{
   vercel: { connected: boolean; who: string | null };
   cloudflare: { connected: boolean; who: string | null };
 }> {
-  const [targets, githubUser, vercelUser, cloudflareUser, sites] = await Promise.all([
-    listDeployTargets(env),
-    getSetting(env.DB, "github_user"),
-    getSetting(env.DB, "vercel_user"),
-    getSetting(env.DB, "cloudflare_user"),
-    env.DB.prepare("SELECT id, name FROM analytics_sites ORDER BY created_at ASC").all<{
-      id: string;
-      name: string;
-    }>(),
+  const targets = await listDeployTargets(env);
+  const [githubRes, vercelRes, cloudflareRes, sites] = await env.DB.batch([
+    env.DB.prepare("SELECT value FROM settings WHERE key = 'github_user'"),
+    env.DB.prepare("SELECT value FROM settings WHERE key = 'vercel_user'"),
+    env.DB.prepare("SELECT value FROM settings WHERE key = 'cloudflare_user'"),
+    env.DB.prepare("SELECT id, name FROM analytics_sites ORDER BY created_at ASC"),
   ]);
+  const githubUser = ((githubRes.results ?? [])[0] as { value: string } | undefined)?.value ?? null;
+  const vercelUser = ((vercelRes.results ?? [])[0] as { value: string } | undefined)?.value ?? null;
+  const cloudflareUser = ((cloudflareRes.results ?? [])[0] as { value: string } | undefined)?.value ?? null;
   return {
     targets: targets.map((t) => ({ ...t, commits: parseCommits(t.last_commits) })),
-    sites: sites.results ?? [],
+    sites: (sites.results ?? []) as Array<{ id: string; name: string }>,
     github: { connected: githubUser != null, who: githubUser },
     vercel: { connected: vercelUser != null, who: vercelUser },
     cloudflare: { connected: cloudflareUser != null, who: cloudflareUser },

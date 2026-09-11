@@ -14,16 +14,17 @@ export const signals: Plugin = {
   deps: ["analytics"],
   adminFooter: "Signals poll every 15 minutes. X needs a bearer key; Reddit needs a script-type app id/secret; GitHub reuses the deploy token.",
   async adminSection(ctx: SectionCtx) {
-    const [watchers, signals, sites] = await Promise.all([
-      listWatchers(ctx.env.DB),
-      listSignals(ctx.env.DB),
-      listAnalyticsSites(ctx.env.DB),
+    const watchers = await listWatchers(ctx.env.DB);
+    const signals = await listSignals(ctx.env.DB);
+    const sites = await listAnalyticsSites(ctx.env.DB);
+    const [xRes, redditIdRes, redditSecretRes] = await ctx.env.DB.batch([
+      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'signals_x_bearer'"),
+      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'signals_reddit_client_id'"),
+      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'signals_reddit_client_secret'"),
     ]);
-    const [xBearer, redditId, redditSecret] = await Promise.all([
-      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'signals_x_bearer'").first<{ value: string }>(),
-      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'signals_reddit_client_id'").first<{ value: string }>(),
-      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'signals_reddit_client_secret'").first<{ value: string }>(),
-    ]);
+    const xBearer = (xRes.results ?? [])[0] as { value: string } | undefined;
+    const redditId = (redditIdRes.results ?? [])[0] as { value: string } | undefined;
+    const redditSecret = (redditSecretRes.results ?? [])[0] as { value: string } | undefined;
 
     const watcherRows =
       watchers.length === 0

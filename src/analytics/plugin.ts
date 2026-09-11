@@ -37,7 +37,8 @@ export const analytics: Plugin = {
   },
   async adminSection(ctx: SectionCtx) {
     const sites = await listAnalyticsSites(ctx.env.DB);
-    const stats = await Promise.all(sites.map((s) => siteStats(ctx.env, s)));
+    const stats = [];
+    for (const s of sites) stats.push(await siteStats(ctx.env, s));
     return adminAnalytics(stats, ctx.origin);
   },
   async occupied(ctx: SectionCtx) {

@@ -12,7 +12,7 @@ import {
   sendTestAlert,
 } from "./kernel/alert";
 import { PLUGINS } from "./kernel/catalog";
-import { getSetting, setSetting } from "./kernel/db";
+import { getSettings, setSetting } from "./kernel/db";
 import { redirect } from "./kernel/http";
 import { collect, dispatch, firstKicker, sumHealth } from "./kernel/plugin";
 import { runTick } from "./kernel/tick";
@@ -32,13 +32,14 @@ import { parseHttpUrl } from "./kernel/util";
 import { adminShell, ago, html, loginPage, overallOf, revealPage, settingsCard, statusPage } from "./ui";
 
 export default {
-  async fetch(request, env, execCtx) {
-    const response = await handle(request, env, execCtx);
+  async fetch(request, env) {
+    const response = await handle(request, env);
     // Dogfood the SDK: track AI bots fetching this worker's own pages.
-    // The local onEvent sink writes straight to D1 — no HTTP hop.
+    // Local onEvent writes D1 inline (no waitUntil) so the SQLite mutex is
+    // not pinned after the response.
     if (env.INDIESTACK_SITE_ID) {
       try {
-        await trackAIBotResponse(request, response, execCtx, {
+        await trackAIBotResponse(request, response, undefined, {
           websiteId: env.INDIESTACK_SITE_ID,
           onEvent: (event) => {
             // cf.asn is authoritative here — the worker IS the edge.
@@ -103,7 +104,7 @@ async function lastGithubSync(env: Env): Promise<{ at: number; synced: number; e
   }
 }
 
-async function handle(request: Request, env: Env, _execCtx?: ExecutionContext): Promise<Response> {
+async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const ctx = {
     request,
@@ -384,42 +385,35 @@ async function handle(request: Request, env: Env, _execCtx?: ExecutionContext): 
         fetches: Number(r.fetches),
         lastTs: r.last_ts,
       })),
-      sites: await Promise.all(
-        sites.map(async (site) => {
+      sites: await (async () => {
+        const out = [];
+        for (const site of sites) {
           const s = await siteStats(env, site, 7);
-          const [aiRows, keywordRows, deviceRows, newReturn] = await Promise.all([
+          const [aiRows, keywordRows, deviceRows, newReturn] = await env.DB.batch([
             env.DB.prepare(
               `SELECT ref_source AS source, COUNT(*) AS views FROM hits
                WHERE site_id = ? AND day >= ? AND ref_class = 'ai' GROUP BY ref_source ORDER BY views DESC LIMIT 8`,
-            )
-              .bind(site.id, sinceDay)
-              .all<{ source: string; views: number }>(),
+            ).bind(site.id, sinceDay),
             env.DB.prepare(
               `SELECT search_term AS term, COUNT(*) AS views FROM hits
                WHERE site_id = ? AND day >= ? AND ref_class = 'search' AND search_term IS NOT NULL
                GROUP BY search_term ORDER BY views DESC LIMIT 8`,
-            )
-              .bind(site.id, sinceDay)
-              .all<{ term: string; views: number }>(),
+            ).bind(site.id, sinceDay),
             env.DB.prepare(
               `SELECT device, COUNT(*) AS views FROM hits
                WHERE site_id = ? AND day >= ? GROUP BY device ORDER BY views DESC LIMIT 4`,
-            )
-              .bind(site.id, sinceDay)
-              .all<{ device: string; views: number }>(),
+            ).bind(site.id, sinceDay),
             env.DB.prepare(
               `SELECT new_visitor, COUNT(DISTINCT vid) AS n FROM hits
                WHERE site_id = ? AND day >= ? GROUP BY new_visitor`,
-            )
-              .bind(site.id, sinceDay)
-              .all<{ new_visitor: number; n: number }>(),
+            ).bind(site.id, sinceDay),
           ]);
           const nr = { new: 0, returning: 0 };
-          for (const r of newReturn.results ?? []) {
+          for (const r of (newReturn.results ?? []) as Array<{ new_visitor: number; n: number }>) {
             if (Number(r.new_visitor) === 1) nr.new = Number(r.n);
             else nr.returning = Number(r.n);
           }
-          return {
+          out.push({
             id: site.id,
             name: site.name,
             enabled: site.enabled,
@@ -430,46 +424,43 @@ async function handle(request: Request, env: Env, _execCtx?: ExecutionContext): 
             topPaths: s.topPaths,
             topRefs: s.topRefs,
             topCountries: s.topCountries,
-            aiRefs: aiRows.results ?? [],
-            keywords: keywordRows.results ?? [],
-            devices: deviceRows.results ?? [],
+            aiRefs: (aiRows.results ?? []) as Array<{ source: string; views: number }>,
+            keywords: (keywordRows.results ?? []) as Array<{ term: string; views: number }>,
+            devices: (deviceRows.results ?? []) as Array<{ device: string; views: number }>,
             annotations: annotationsBySite.get(site.id) ?? [],
             share: shareBySite.get(site.id) ?? { on: false, url: null },
             snippet: `<script defer src="${origin}/a.js" data-site="${site.token}"><\/script>`,
-          };
-        }),
-      ),
+          });
+        }
+        return out;
+      })(),
     });
   }
   if (ctx.path === "/api/revenue" && ctx.method === "GET") {
     const gate = await gateAdmin(request, env);
     if (gate) return gate;
     const since = Date.now() - 30 * 86400000;
-    const [payments, secret, totals, bySource] = await Promise.all([
-      env.DB.prepare("SELECT * FROM payments ORDER BY ts DESC LIMIT 20").all(),
-      env.DB.prepare("SELECT value FROM settings WHERE key = 'stripe_webhook_secret'").first<{
-        value: string;
-      }>(),
-      env.DB.prepare("SELECT COUNT(*) AS n, SUM(amount_cents) AS cents FROM payments WHERE ts >= ?")
-        .bind(since)
-        .first<{ n: number; cents: number | null }>(),
+    const [payments, secretRes, totalsRes, bySource] = await env.DB.batch([
+      env.DB.prepare("SELECT * FROM payments ORDER BY ts DESC LIMIT 20"),
+      env.DB.prepare("SELECT value FROM settings WHERE key = 'stripe_webhook_secret'"),
+      env.DB.prepare("SELECT COUNT(*) AS n, SUM(amount_cents) AS cents FROM payments WHERE ts >= ?").bind(since),
       env.DB.prepare(
         `SELECT COALESCE(source_ref, 'direct') AS src, COUNT(*) AS n, SUM(amount_cents) AS cents
          FROM payments WHERE ts >= ? GROUP BY src ORDER BY cents DESC LIMIT 8`,
-      )
-        .bind(since)
-        .all<{ src: string; n: number; cents: number }>(),
+      ).bind(since),
     ]);
+    const secret = (secretRes.results ?? [])[0] as { value: string } | undefined;
+    const totals = (totalsRes.results ?? [])[0] as { n: number; cents: number | null } | undefined;
     const money = (cents: number, currency: string) => `${(cents / 100).toFixed(2)} ${currency}`;
     return Response.json({
       secret: Boolean(secret?.value),
       totals: { n: totals?.n ?? 0, label: money(Number(totals?.cents ?? 0), "USD") },
-      bySource: (bySource.results ?? []).map((r) => ({
+      bySource: ((bySource.results ?? []) as Array<{ src: string; n: number; cents: number }>).map((r) => ({
         src: r.src,
         n: r.n,
         label: money(Number(r.cents), "USD"),
       })),
-      payments: (payments.results ?? []).map((p: Record<string, unknown>) => ({
+      payments: ((payments.results ?? []) as Array<Record<string, unknown>>).map((p) => ({
         amount: money(Number(p.amount_cents), String(p.currency)),
         from: p.source_ref ? String(p.source_ref) : "direct",
         detail: `${String(p.source_path ?? "")}${p.customer ? ` · ${String(p.customer)}` : ""}`,
@@ -483,62 +474,66 @@ async function handle(request: Request, env: Env, _execCtx?: ExecutionContext): 
     const url = new URL(request.url);
     const origin = `${url.protocol}//${url.host}`;
     const sites = await listAnalyticsSites(env.DB);
-    return Response.json({
-      sites: await Promise.all(
-        sites.map(async (site) => ({
-          id: site.id,
-          name: site.name,
-          ...(await crawlSummary(env, site.id)),
-          snippet: ingestSnippet(origin, site.token),
-        })),
-      ),
-    });
+    const crawlSites = [];
+    for (const site of sites) {
+      crawlSites.push({
+        id: site.id,
+        name: site.name,
+        ...(await crawlSummary(env, site.id)),
+        snippet: ingestSnippet(origin, site.token),
+      });
+    }
+    return Response.json({ sites: crawlSites });
   }
   if (ctx.path === "/api/signals" && ctx.method === "GET") {
     const gate = await gateAdmin(request, env);
     if (gate) return gate;
-    const [watchers, signals, sites] = await Promise.all([
-      listWatchers(env.DB),
-      listSignals(env.DB),
-      listAnalyticsSites(env.DB),
+    const watchers = await listWatchers(env.DB);
+    const signals = await listSignals(env.DB);
+    const sites = await listAnalyticsSites(env.DB);
+    const keys = await getSettings(env.DB, [
+      "signals_x_bearer",
+      "signals_reddit_client_id",
+      "signals_reddit_client_secret",
     ]);
-    const [x, rid, rsec] = await Promise.all(
-      ["signals_x_bearer", "signals_reddit_client_id", "signals_reddit_client_secret"].map((k) =>
-        env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(k).first<{ value: string }>(),
-      ),
-    );
     return Response.json({
       watchers,
       signals,
       sites: sites.map((s) => ({ id: s.id, name: s.name })),
-      keys: { x: Boolean(x?.value), redditId: Boolean(rid?.value), redditSecret: Boolean(rsec?.value) },
+      keys: {
+        x: Boolean(keys.signals_x_bearer),
+        redditId: Boolean(keys.signals_reddit_client_id),
+        redditSecret: Boolean(keys.signals_reddit_client_secret),
+      },
     });
   }
   if (ctx.path === "/api/goals" && ctx.method === "GET") {
     const gate = await gateAdmin(request, env);
     if (gate) return gate;
-    const [goals, sites] = await Promise.all([listGoals(env.DB), listAnalyticsSites(env.DB)]);
+    const goals = await listGoals(env.DB);
+    const sites = await listAnalyticsSites(env.DB);
     const names = new Map(sites.map((s) => [s.id, s.name]));
+    const goalRows = [];
+    for (const g of goals) {
+      const s7 = await goalStats(env, g, 7);
+      const s30 = await goalStats(env, g, 30);
+      goalRows.push({
+        id: g.id,
+        name: g.name,
+        kind: g.kind,
+        target: g.target,
+        site_name: names.get(g.site_id) ?? "",
+        s7: { converted: s7.converted, uniques: s7.uniques, rate: s7.rate_pct },
+        s30: { converted: s30.converted, uniques: s30.uniques, rate: s30.rate_pct },
+        top: s30.bySource
+          .slice(0, 3)
+          .map((b) => `${b.ref} (${b.converted})`)
+          .join(", "),
+      });
+    }
     return Response.json({
       sites: sites.map((s) => ({ id: s.id, name: s.name })),
-      goals: await Promise.all(
-        goals.map(async (g) => {
-          const [s7, s30] = await Promise.all([goalStats(env, g, 7), goalStats(env, g, 30)]);
-          return {
-            id: g.id,
-            name: g.name,
-            kind: g.kind,
-            target: g.target,
-            site_name: names.get(g.site_id) ?? "",
-            s7: { converted: s7.converted, uniques: s7.uniques, rate: s7.rate_pct },
-            s30: { converted: s30.converted, uniques: s30.uniques, rate: s30.rate_pct },
-            top: s30.bySource
-              .slice(0, 3)
-              .map((b) => `${b.ref} (${b.converted})`)
-              .join(", "),
-          };
-        }),
-      ),
+      goals: goalRows,
     });
   }
   if (ctx.path === "/api/widgets" && ctx.method === "GET") {
@@ -798,12 +793,9 @@ const SETTING_FORM_KEYS = [
 ];
 
 async function loadSettings(env: Env, keys: readonly string[]): Promise<Record<string, string>> {
+  const raw = await getSettings(env.DB, keys);
   const out: Record<string, string> = {};
-  await Promise.all(
-    keys.map(async (key) => {
-      out[key] = (await getSetting(env.DB, key)) ?? "";
-    }),
-  );
+  for (const key of keys) out[key] = raw[key] ?? "";
   return out;
 }
 

@@ -10,27 +10,27 @@ export const aicrawl: Plugin = {
   adminFooter: "AI crawlers are recorded server-side — paste the middleware into the Workers you own. Other bots land under other-bot.",
   async adminSection(ctx: SectionCtx) {
     const sites = await listAnalyticsSites(ctx.env.DB);
-    const blocks = await Promise.all(
-      sites.map(async (site) => {
-        const s = await crawlSummary(ctx.env, site.id);
-        const vendorRows =
-          s.byVendor.length === 0
-            ? `<span class="url">no crawls recorded yet</span>`
-            : s.byVendor
-                .map(
-                  (v) =>
-                    `<div class="url">${esc(v.vendor)} · ${v.n} hit(s) · last ${esc(new Date(v.last_ts).toISOString().slice(0, 16))}Z</div>`,
-                )
-                .join("");
-        const pathRows =
-          s.topPaths.length === 0
-            ? `<span class="url">—</span>`
-            : s.topPaths.map((p) => `<div class="url">${esc(p.path)} · ${p.n}</div>`).join("");
-        const refRows =
-          s.referrals.length === 0
-            ? `<span class="url">—</span>`
-            : s.referrals.map((r) => `<div class="url">${esc(r.ref)} · ${r.views}</div>`).join("");
-        return `<div class="card">
+    const blocks = [];
+    for (const site of sites) {
+      const s = await crawlSummary(ctx.env, site.id);
+      const vendorRows =
+        s.byVendor.length === 0
+          ? `<span class="url">no crawls recorded yet</span>`
+          : s.byVendor
+              .map(
+                (v) =>
+                  `<div class="url">${esc(v.vendor)} · ${v.n} hit(s) · last ${esc(new Date(v.last_ts).toISOString().slice(0, 16))}Z</div>`,
+              )
+              .join("");
+      const pathRows =
+        s.topPaths.length === 0
+          ? `<span class="url">—</span>`
+          : s.topPaths.map((p) => `<div class="url">${esc(p.path)} · ${p.n}</div>`).join("");
+      const refRows =
+        s.referrals.length === 0
+          ? `<span class="url">—</span>`
+          : s.referrals.map((r) => `<div class="url">${esc(r.ref)} · ${r.views}</div>`).join("");
+      blocks.push(`<div class="card">
           <label>${esc(site.name)}</label>
           <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px">
             <div><b>crawlers (30d)</b>${vendorRows}</div>
@@ -39,9 +39,8 @@ export const aicrawl: Plugin = {
           </div>
           <p class="sub" style="margin:10px 0 0">middleware for this site's Worker:</p>
           <div class="url" style="white-space:pre-wrap">${esc(ingestSnippet(ctx.origin, site.token))}</div>
-        </div>`;
-      }),
-    );
+        </div>`);
+    }
     return `<h2>ai crawlers</h2>
     ${sites.length === 0 ? `<p class="sub">Add an analytics site first.</p>` : blocks.join("")}`;
   },

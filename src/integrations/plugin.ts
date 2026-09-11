@@ -38,15 +38,15 @@ export const integrations: Plugin = {
     return `${n.n}/${MAX_DEPLOY_TARGETS} deploys`;
   },
   async adminSection(ctx: SectionCtx) {
-    const [targets, githubUser, vercelUser, cloudflareUser] = await Promise.all([
-      listTargets(ctx.env.DB),
-      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'github_user'")
-        .first<{ value: string }>(),
-      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'vercel_user'")
-        .first<{ value: string }>(),
-      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'cloudflare_user'")
-        .first<{ value: string }>(),
+    const targets = await listTargets(ctx.env.DB);
+    const users = await ctx.env.DB.batch([
+      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'github_user'"),
+      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'vercel_user'"),
+      ctx.env.DB.prepare("SELECT value FROM settings WHERE key = 'cloudflare_user'"),
     ]);
+    const githubUser = (users[0]?.results ?? [])[0] as { value: string } | undefined;
+    const vercelUser = (users[1]?.results ?? [])[0] as { value: string } | undefined;
+    const cloudflareUser = (users[2]?.results ?? [])[0] as { value: string } | undefined;
     return adminDeploys(
       targets,
       { connected: githubUser?.value != null, who: githubUser?.value ?? null },
@@ -245,30 +245,26 @@ export const integrations: Plugin = {
             : provider === "vercel"
               ? await connectVercel(token)
               : await connectCloudflare!(token);
-        const extra: Array<Promise<unknown>> = [];
-        if (provider === "cloudflare" && listAccounts) {
-          // Remember the first account so the worker picker/logs work with no typing.
-          extra.push(
-            listAccounts(token)
-              .then((accts) =>
-                accts[0]
-                  ? env.DB.prepare(
-                      "INSERT INTO settings (key, value) VALUES ('cf_account_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    ).bind(accts[0].id).run()
-                  : null,
-              )
-              .catch(() => null),
-          );
-        }
-        await env.DB.batch([
+        const stmts = [
           env.DB.prepare(
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
           ).bind(`${provider}_token`, token),
           env.DB.prepare(
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
           ).bind(`${provider}_user`, who),
-        ]);
-        await Promise.all(extra);
+        ];
+        if (provider === "cloudflare" && listAccounts) {
+          // Remember the first account so the worker picker/logs work with no typing.
+          const accts = await listAccounts(token).catch(() => [] as Array<{ id: string }>);
+          if (accts[0]) {
+            stmts.push(
+              env.DB.prepare(
+                "INSERT INTO settings (key, value) VALUES ('cf_account_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+              ).bind(accts[0].id),
+            );
+          }
+        }
+        await env.DB.batch(stmts);
         return jsonOk(`connected as ${who}`);
       } catch (err) {
         return jsonErr(`token rejected: ${String(err).slice(0, 80)}`);

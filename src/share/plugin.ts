@@ -44,7 +44,8 @@ export const share: Plugin = {
   deps: ["analytics", "goals"],
   adminFooter: "Share links are public: visitors see views, uniques, top paths, referrers and goals — never raw visitor data.",
   async adminSection(ctx: SectionCtx) {
-    const [sites, shares] = await Promise.all([listAnalyticsSites(ctx.env.DB), listShares(ctx.env.DB)]);
+    const sites = await listAnalyticsSites(ctx.env.DB);
+    const shares = await listShares(ctx.env.DB);
     const bySite = new Map(shares.map((s) => [s.site_id, s]));
     const rows = sites
       .map((site) => {
@@ -105,7 +106,8 @@ export const share: Plugin = {
     const live = await liveVisitors(ctx.env, row.id);
     const events = await topEvents(ctx.env, row.id, days);
     const goals = (await listGoals(ctx.env.DB)).filter((g) => g.site_id === row.id);
-    const goalRows = await Promise.all(goals.map(async (g) => ({ g, s: await goalStats(ctx.env, g, 30) })));
+    const goalRows = [];
+    for (const g of goals) goalRows.push({ g, s: await goalStats(ctx.env, g, 30) });
 
     const body = `<header>
       <div class="brand">${esc(row.name)} <span>analytics · shared</span></div>

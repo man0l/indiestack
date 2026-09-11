@@ -18,12 +18,12 @@ export const logs: Plugin = {
     return `${n?.n ?? 0}/10 logs`;
   },
   async adminSection(ctx: SectionCtx) {
-    const [sources, cfMapping, vMapping, gMapping] = await Promise.all([
-      listLogSources(ctx.env.DB),
-      import("../cloudflare/index").then((m) => m.getCfMapping(ctx.env)),
-      import("../integrations/index").then((m) => m.getVercelMapping(ctx.env)),
-      import("../integrations/index").then((m) => m.getGithubMapping(ctx.env)),
-    ]);
+    const sources = await listLogSources(ctx.env.DB);
+    const { getCfMapping } = await import("../cloudflare/index");
+    const { getVercelMapping, getGithubMapping } = await import("../integrations/index");
+    const cfMapping = await getCfMapping(ctx.env);
+    const vMapping = await getVercelMapping(ctx.env);
+    const gMapping = await getGithubMapping(ctx.env);
     const names = new Map(sources.map((s) => [s.id, s.name]));
     const mapped = [
       ...Object.entries(cfMapping).map(([worker, pref]) => ({

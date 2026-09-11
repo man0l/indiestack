@@ -60,7 +60,7 @@ app.use(async (req, res, next) => {
 | `endpoint` | `string` | Override the indiestack worker origin (self-hosting). |
 | `authToken` | `string` | Optional secret, sent as `x-indiestack-token`. |
 | `publicOrigin` | `string` | Tracked site origin when the runtime can't derive it. |
-| `onEvent` | `function` | Local sink instead of HTTP delivery — useful for self-tracking inside the indiestack worker itself. |
+| `onEvent` | `function` | Local sink instead of HTTP delivery (tests, self-hosted ingest). |
 
 ## Categories
 

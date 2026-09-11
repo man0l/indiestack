@@ -1,4 +1,4 @@
-import { getSetting, setSetting } from "./db";
+import { getSetting, getSettings, setSetting } from "./db";
 
 export type Channels = {
   webhook: string | null;
@@ -22,15 +22,14 @@ const SETTING_KEYS = [
 export const ALERT_SETTING_KEYS: readonly string[] = SETTING_KEYS;
 
 export async function loadChannels(env: Env): Promise<Channels> {
-  const [webhook, telegramToken, telegramChat, resendKey, alertEmail, alertFrom] =
-    await Promise.all(SETTING_KEYS.map((key) => getSetting(env.DB, key)));
+  const s = await getSettings(env.DB, SETTING_KEYS);
   return {
-    webhook,
-    telegramToken,
-    telegramChat,
-    resendKey,
-    alertEmail,
-    alertFrom,
+    webhook: s.webhook_url,
+    telegramToken: s.telegram_bot_token,
+    telegramChat: s.telegram_chat_id,
+    resendKey: s.resend_api_key,
+    alertEmail: s.alert_email,
+    alertFrom: s.alert_from,
   };
 }
 
