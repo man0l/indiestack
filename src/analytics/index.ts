@@ -12,7 +12,7 @@ export type AnalyticsSite = {
   token: string;
   enabled: number;
   created_at: number;
-  /** 'daily': cookie-free rotating hash · 'persistent': client localStorage UUID. */
+  /** 'daily': cookie-free rotating hash · 'persistent': client localStorage UUID, rotated every 13 months. */
   id_mode: AnalyticsSiteIdMode;
 };
 
@@ -34,11 +34,17 @@ export function collectorScript(): string {
   var last=location.pathname;
   function vid(){
     try{
-      var k="df_vid_"+site;
-      var v=localStorage.getItem(k);
-      if(!v){
-        v=(crypto&&crypto.randomUUID)?crypto.randomUUID():"v"+String(Date.now())+Math.random().toString(36).slice(2,10);
+      // 13x30-day rotation: keeps the id within the exempt
+      // audience-measurement storage cap. Existing bare ids are stamped on
+      // first sight and kept for the remainder of the window, not reset.
+      var k="df_vid_"+site,kt=k+"_ts";
+      var now=Date.now();
+      var v=localStorage.getItem(k),t=parseInt(localStorage.getItem(kt)||"0",10)||0;
+      if(!t){t=now;localStorage.setItem(kt,String(now));}
+      if(!v||now-t>13*30*24*60*60*1000){
+        v=(crypto&&crypto.randomUUID)?crypto.randomUUID():"v"+String(now)+Math.random().toString(36).slice(2,10);
         localStorage.setItem(k,v);
+        localStorage.setItem(kt,String(now));
       }
       return v;
     }catch(_){return "";}
