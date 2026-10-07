@@ -265,8 +265,51 @@
     }
   }
 
-  const lvlVariant = (l: string | null) =>
-    l === 'error' || l === 'fatal' ? 'destructive' : l === 'warn' || l === 'warning' ? 'secondary' : 'outline';
+  const lvlTone = (l: string | null) =>
+    l === 'error' || l === 'fatal' ? 'error' : l === 'warn' || l === 'warning' ? 'warn' : 'info';
+  const dotClass = { error: 'bg-destructive', warn: 'bg-amber-500', info: 'bg-muted-foreground/40' };
+
+  const srcName = (e: LogEvent) => e.source_name ?? sources.find((s) => s.id === e.source_id)?.name ?? '';
+  const clock = (ts: number) => {
+    const d = new Date(ts);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const dayLabel = (ts: number) => {
+    const d = new Date(ts);
+    const today = new Date();
+    const yest = new Date(today.getTime() - 86400000);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  // drop the "[source] " prefix the source chip already shows
+  const cleanMsg = (e: LogEvent) => {
+    let m = e.message.trim();
+    const n = srcName(e);
+    if (n && m.toLowerCase().startsWith(`[${n.toLowerCase()}]`)) m = m.slice(n.length + 2).trim();
+    return m;
+  };
+
+  type Row = { head: LogEvent; count: number; msg: string; keys: string[] };
+  type Day = { label: string; rows: Row[] };
+
+  // Group by day, and fold consecutive identical lines ("sweep idle" x5) into one row.
+  const days: Day[] = $derived.by(() => {
+    const out: Day[] = [];
+    for (const e of events) {
+      const label = dayLabel(e.ts);
+      let day = out[out.length - 1];
+      if (!day || day.label !== label) out.push((day = { label, rows: [] }));
+      const msg = cleanMsg(e);
+      const last = day.rows[day.rows.length - 1];
+      if (last && last.msg === msg && last.head.level === e.level && srcName(last.head) === srcName(e)) {
+        last.count++;
+        last.keys.push(e.key);
+      } else day.rows.push({ head: e, count: 1, msg, keys: [e.key] });
+    }
+    return out;
+  });
 </script>
 
 <Card.Root>
@@ -582,24 +625,43 @@
         </Empty.Header>
       </Empty.Root>
     {:else}
-      <div class="flex flex-col gap-1">
-        {#each events as e (e.key)}
-          <div class="rounded-lg py-2">
-            <button
-              type="button"
-              class="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-left"
-              onclick={() => (expanded = { ...expanded, [e.key]: !expanded[e.key] })}
-              aria-expanded={Boolean(expanded[e.key])}
-            >
-              <span class="shrink-0 text-xs text-muted-foreground tabular-nums">{time(e.ts)}</span>
-              {#if e.level}<Badge variant={lvlVariant(e.level)}>{e.level}</Badge>{/if}
-              <span class="shrink-0 truncate text-xs text-muted-foreground">{e.source_name ?? sources.find((s) => s.id === e.source_id)?.name ?? ''}</span>
-              <span class="min-w-0 flex-1 basis-48 truncate text-sm">{e.message}</span>
-            </button>
-            {#if expanded[e.key]}
-              <pre class="mt-2 max-h-64 overflow-auto rounded-lg border border-border bg-muted/50 p-3 font-mono text-xs text-muted-foreground">{JSON.stringify(e.data, null, 2)}</pre>
-            {/if}
-          </div>
+      <div class="flex flex-col gap-4">
+        {#each days as day (day.label)}
+          <section>
+            <h3 class="sticky top-0 z-10 mb-1 bg-card/90 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase backdrop-blur">{day.label}</h3>
+            <ul class="divide-y divide-border/60 rounded-lg border border-border">
+              {#each day.rows as r (r.head.key)}
+                {@const tone = lvlTone(r.head.level)}
+                <li class={tone === 'error' ? 'bg-destructive/5' : tone === 'warn' ? 'bg-amber-500/5' : ''}>
+                  <button
+                    type="button"
+                    class="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-muted/40"
+                    onclick={() => (expanded = { ...expanded, [r.head.key]: !expanded[r.head.key] })}
+                    aria-expanded={Boolean(expanded[r.head.key])}
+                  >
+                    <span class="mt-1.5 size-2 shrink-0 rounded-full {dotClass[tone]}" title={r.head.level ?? 'info'}></span>
+                    <span class="mt-0.5 w-11 shrink-0 text-xs text-muted-foreground tabular-nums">{clock(r.head.ts)}</span>
+                    <span class="min-w-0 flex-1">
+                      <span class="line-clamp-2 text-sm break-words {tone === 'info' ? 'text-foreground/80' : 'font-medium'}">{r.msg}</span>
+                    </span>
+                    {#if r.count > 1}<Badge variant="secondary" class="shrink-0 tabular-nums">×{r.count}</Badge>{/if}
+                    {#if srcName(r.head)}<span class="mt-0.5 hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground sm:inline">{srcName(r.head)}</span>{/if}
+                  </button>
+                  {#if expanded[r.head.key]}
+                    <div class="space-y-2 px-3 pb-3 pl-[3.75rem]">
+                      <p class="text-sm break-words whitespace-pre-wrap">{r.msg}</p>
+                      {#if r.count > 1}
+                        <p class="text-xs text-muted-foreground">{r.count} identical entries, latest {clock(r.head.ts)}, earliest {clock(events.find((x) => x.key === r.keys[r.keys.length - 1])?.ts ?? r.head.ts)}</p>
+                      {/if}
+                      {#if r.head.data != null && JSON.stringify(r.head.data) !== '{}'}
+                        <pre class="max-h-64 overflow-auto rounded-lg border border-border bg-muted/50 p-3 font-mono text-xs text-muted-foreground">{JSON.stringify(r.head.data, null, 2)}</pre>
+                      {/if}
+                    </div>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </section>
         {/each}
       </div>
     {/if}
