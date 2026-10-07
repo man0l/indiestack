@@ -629,14 +629,22 @@
         {#each days as day (day.label)}
           <section>
             <h3 class="sticky top-0 z-10 mb-1 bg-card/90 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase backdrop-blur">{day.label}</h3>
-            <ul class="divide-y divide-border/60 rounded-lg border border-border">
+            <div class="divide-y divide-border/60 overflow-hidden rounded-lg border border-border bg-card">
               {#each day.rows as r (r.head.key)}
                 {@const tone = lvlTone(r.head.level)}
-                <li class={tone === 'error' ? 'bg-destructive/5' : tone === 'warn' ? 'bg-amber-500/5' : ''}>
-                  <button
-                    type="button"
-                    class="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-muted/40"
+                <div class={tone === 'error' ? 'bg-destructive/10' : tone === 'warn' ? 'bg-amber-500/10' : ''}>
+                  <!-- div, not <button>/<li>: admin has no preflight and worker CSS paints buttons grey, bullets leak on lists -->
+                  <div
+                    role="button"
+                    tabindex="0"
+                    class="flex w-full cursor-pointer items-start gap-3 px-3 py-2 text-left hover:bg-muted/60"
                     onclick={() => (expanded = { ...expanded, [r.head.key]: !expanded[r.head.key] })}
+                    onkeydown={(ev) => {
+                      if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        expanded = { ...expanded, [r.head.key]: !expanded[r.head.key] };
+                      }
+                    }}
                     aria-expanded={Boolean(expanded[r.head.key])}
                   >
                     <span class="mt-1.5 size-2 shrink-0 rounded-full {dotClass[tone]}" title={r.head.level ?? 'info'}></span>
@@ -646,7 +654,7 @@
                     </span>
                     {#if r.count > 1}<Badge variant="secondary" class="shrink-0 tabular-nums">×{r.count}</Badge>{/if}
                     {#if srcName(r.head)}<span class="mt-0.5 hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground sm:inline">{srcName(r.head)}</span>{/if}
-                  </button>
+                  </div>
                   {#if expanded[r.head.key]}
                     <div class="space-y-2 px-3 pb-3 pl-[3.75rem]">
                       <p class="text-sm break-words whitespace-pre-wrap">{r.msg}</p>
@@ -658,9 +666,9 @@
                       {/if}
                     </div>
                   {/if}
-                </li>
+                </div>
               {/each}
-            </ul>
+            </div>
           </section>
         {/each}
       </div>
