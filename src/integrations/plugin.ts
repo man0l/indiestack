@@ -293,10 +293,11 @@ export const integrations: Plugin = {
         ).bind(p).run();
         disabled = r.meta?.changes ?? 0;
       }
-      await env.DB.batch([
-        env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(`${p}_token`),
-        env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(`${p}_user`),
-      ]);
+      // Also drop the log-sync mapping + its poll state, otherwise the 5-min
+      // sync keeps running against a provider that is no longer connected.
+      const keys = [`${p}_token`, `${p}_user`];
+      if (p !== "cloudflare") keys.push(`${p}_log_sources`, `${p}_log_poll_at`, `${p}_log_last`);
+      await env.DB.batch(keys.map((k) => env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(k)));
       return jsonOk(disabled ? `disconnected · disabled ${disabled} ${p} target(s)` : "disconnected");
     }
 

@@ -27,6 +27,7 @@ export type DeployTarget = {
   created_at: number;
   site_id: string | null;
   last_commits: string | null;
+  gone_count?: number;
 };
 
 export type CommitInfo = {
@@ -65,7 +66,12 @@ export type DeployResult = {
   error: string | null;
   /** recent commits (github) — empty for vercel / failures */
   commits?: CommitInfo[];
+  /** provider says the project no longer exists (404) — counts toward auto-disable */
+  gone?: boolean;
 };
+
+/** Consecutive 404 probes before a target whose project was deleted is auto-disabled. */
+export const GONE_DISABLE_AFTER = 3;
 
 const UA = "indiestack-deploys/0.1";
 
@@ -199,7 +205,7 @@ export async function queryVercelLogs(
   projectId: string,
   team: string | null,
   limit = 50,
-): Promise<{ events: VercelLogEvent[]; error: string | null }> {
+): Promise<{ events: VercelLogEvent[]; error: string | null; gone?: boolean }> {
   const token = await getSetting(env.DB, "vercel_token");
   if (!token) return { events: [], error: "vercel not connected" };
   const q = new URLSearchParams({ limit: "1", target: "production", projectId });
@@ -208,6 +214,7 @@ export async function queryVercelLogs(
   try {
     const res = await fetch(`https://api.vercel.com/v6/deployments?${q}`, { headers: jsonHeaders(token) });
     if (res.status === 401 || res.status === 403) return { events: [], error: "token rejected" };
+    if (res.status === 404) return { events: [], error: "project deleted", gone: true };
     if (!res.ok) return { events: [], error: `vercel ${res.status}` };
     const json = (await res.json()) as { deployments?: Array<{ uid?: string }> };
     const first = json.deployments?.[0]?.uid;
@@ -327,7 +334,8 @@ async function vercelProbe(t: DeployTarget, token: string | null): Promise<Deplo
     return { ok: false, detail: null, error: await readError(res), commits: [] };
   }
   if (res.status === 404) {
-    return { ok: false, detail: null, error: "project not found (check id or team)", commits: [] };
+    // Deleted project (or wrong id/team): not a failed deploy — stay unknown, no alert.
+    return { ok: null, detail: null, error: "project deleted or not found (check id or team)", commits: [], gone: true };
   }
   if (!res.ok) {
     return { ok: null, detail: null, error: `vercel ${res.status}`, commits: [] };
@@ -437,10 +445,21 @@ export async function scanDeploys(env: Env, now: number): Promise<DeployStats> {
       const r = results[j];
       // Infra error / no signal yet: record it, keep the previous status, no alert.
       if (r.ok === null) {
+        const gone = r.gone ? (t.gone_count ?? 0) + 1 : 0;
+        if (gone >= GONE_DISABLE_AFTER) {
+          // Project is gone for good: stop probing instead of retrying forever.
+          stmts.push(
+            env.DB.prepare(
+              `UPDATE deploy_targets SET enabled = 0, status = 'unknown', last_check_at = ?, last_error = ?, gone_count = ? WHERE id = ?`,
+            ).bind(now, `${r.error ?? "project deleted"} · auto-disabled after ${gone} checks`, gone, t.id),
+          );
+          pending.push(`DISABLED · ${t.name} · ${t.provider} project deleted · stopped checking`);
+          continue;
+        }
         stmts.push(
           env.DB.prepare(
-            `UPDATE deploy_targets SET last_check_at = ?, last_detail = COALESCE(?, last_detail), last_error = ? WHERE id = ?`,
-          ).bind(now, r.detail, r.error, t.id),
+            `UPDATE deploy_targets SET last_check_at = ?, last_detail = COALESCE(?, last_detail), last_error = ?, gone_count = ? WHERE id = ?`,
+          ).bind(now, r.detail, r.error, gone, t.id),
         );
         continue;
       }
@@ -462,7 +481,7 @@ export async function scanDeploys(env: Env, now: number): Promise<DeployStats> {
         env.DB.prepare(
           `UPDATE deploy_targets SET
              status = ?, last_check_at = ?, last_detail = ?, last_error = ?,
-             consecutive = ?, last_nag_at = ?, last_commits = COALESCE(?, last_commits)
+             consecutive = ?, last_nag_at = ?, last_commits = COALESCE(?, last_commits), gone_count = 0
            WHERE id = ?`,
         ).bind(next, now, r.detail, r.error, consecutive, lastNag, mergeCommits(t.last_commits, r.commits ?? [], now), t.id),
       );
@@ -706,6 +725,8 @@ export async function syncVercelLogs(env: Env, now: number): Promise<number> {
   const mapping = await getVercelMapping(env);
   const pids = Object.keys(mapping).slice(0, 5);
   if (!pids.length) return 0;
+  // Disconnected: nothing to pull, and no point stamping a "not connected" error every 5 min.
+  if (!(await getSetting(env.DB, "vercel_token"))) return 0;
   const last = Number((await getSetting(env.DB, "vercel_log_poll_at")) ?? 0);
   if (now - last < VERCEL_LOG_EVERY_MS) return 0;
   const teamRows = await env.DB.prepare(
@@ -719,6 +740,7 @@ export async function syncVercelLogs(env: Env, now: number): Promise<number> {
   );
   let synced = 0;
   let firstError: string | null = null;
+  const gone: string[] = [];
   for (const pid of pids) {
     const entry = mapping[pid];
     const sid = typeof entry === "string" ? entry : entry?.source;
@@ -729,10 +751,12 @@ export async function syncVercelLogs(env: Env, now: number): Promise<number> {
       (typeof entry === "object" && entry !== null ? entry.team : null) ??
       teamByProject.get(pid) ??
       null;
-    const { events, error } = await queryVercelLogs(env, pid, team, VERCEL_LOG_CAP).catch(() => ({
+    const { events, error, gone: isGone } = await queryVercelLogs(env, pid, team, VERCEL_LOG_CAP).catch(() => ({
       events: [],
       error: "failed" as string | null,
+      gone: false,
     }));
+    if (isGone) gone.push(pid);
     if (error && !firstError) firstError = `${pid.slice(0, 16)}: ${error}`;
     const kept = quiet ? events.filter((e) => e.level !== "info") : events;
     synced += await putLogEvents(
@@ -745,6 +769,13 @@ export async function syncVercelLogs(env: Env, now: number): Promise<number> {
         data: { project: pid, label, message: e.message },
       })),
     ).catch(() => 0);
+  }
+  if (gone.length) {
+    // Deleted projects: unmap them so the sync stops polling a 404 forever.
+    const next: VercelLogMap = { ...mapping };
+    for (const pid of gone) delete next[pid];
+    await setSetting(env.DB, "vercel_log_sources", JSON.stringify(next)).catch(() => {});
+    if (firstError) firstError = `${firstError} · unmapped ${gone.length} deleted project(s)`;
   }
   await setSetting(env.DB, "vercel_log_poll_at", String(now)).catch(() => {});
   await setSetting(env.DB, "vercel_log_last", JSON.stringify({ at: now, synced, error: firstError })).catch(
