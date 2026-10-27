@@ -68,6 +68,15 @@ async function logSourceList(env: Env): Promise<Array<{ id: string; name: string
   return rows.results ?? [];
 }
 
+/** Provider log-sync block removed from the log manager (token stays connected). */
+async function isLogsHidden(env: Env, provider: "vercel" | "github"): Promise<boolean> {
+  return env.DB.prepare("SELECT value FROM settings WHERE key = ?")
+    .bind(`${provider}_logs_hidden`)
+    .first<{ value: string }>()
+    .then((r) => r?.value === "1")
+    .catch(() => false);
+}
+
 async function lastVercelSync(env: Env): Promise<{ at: number; synced: number; error: string | null } | null> {
   const raw = await env.DB.prepare("SELECT value FROM settings WHERE key = 'vercel_log_last'")
     .first<{ value: string }>()
@@ -185,6 +194,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (!token) {
       return Response.json({ connected: false, projects: [], mapping: {} });
     }
+    if (await isLogsHidden(env, "vercel")) {
+      return Response.json({ connected: true, hidden: true, projects: [], teams: [], mapping: {}, sync: null });
+    }
     // Projects/teams only change on deploy or team shuffle: short KV cache keeps the page snappy.
     const cacheKey = `vc:projteam:${team ?? "_"}`;
     type ProjectLists = { projects: Array<{ id: string; name: string }>; teams: Array<{ id: string; slug: string }> };
@@ -218,6 +230,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
       .then((r) => r?.value ?? null);
     if (!token) {
       return Response.json({ connected: false, repos: [], mapping: {}, sync: null });
+    }
+    if (await isLogsHidden(env, "github")) {
+      return Response.json({ connected: true, hidden: true, repos: [], mapping: {}, sync: null });
     }
     let repos: Array<{ full_name: string; private: boolean; pushed_at: string }> = [];
     let error: string | null = null;

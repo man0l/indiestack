@@ -45,6 +45,8 @@
   let vPickSource = $state('');
   let vSync: { at: number; synced: number; error: string | null } | null = $state(null);
   let vLoading = $state(false);
+  let vHidden = $state(false);
+  let ghHidden = $state(false);
   let ghConnected = $state(false);
   let ghRepos: Array<{ full_name: string; private: boolean; pushed_at: string }> = $state([]);
   let ghMapping: Record<string, { source: string; quiet?: boolean }> = $state({});
@@ -102,6 +104,7 @@
       if (!r.ok) return;
       const j = await r.json();
       ghConnected = j.connected ?? false;
+      ghHidden = j.hidden ?? false;
       ghRepos = j.repos ?? [];
       ghMapping = j.mapping ?? {};
       ghSync = j.sync ?? null;
@@ -175,6 +178,8 @@
       vMapping = j.mapping ?? vMapping;
       vSync = j.sync ?? null;
       vercelConnected = j.connected ?? false;
+      vHidden = j.hidden ?? false;
+      if (vHidden) return;
       // Keep teams referenced by existing mappings selectable even if the teams call failed.
       for (const e of Object.values(vMapping)) {
         const t = typeof e === 'string' ? null : (e.team ?? null);
@@ -244,6 +249,30 @@
     else {
       vMapping = next;
       await load();
+    }
+  }
+
+  // Remove a provider's log-sync block (its deploy token stays connected) or bring it back.
+  async function toggleLogs(provider: 'vercel' | 'github', action: 'remove' | 'restore') {
+    if (action === 'remove' && !confirm(`Remove ${provider} from the log manager? Deploy tracking stays connected; you can add it back below.`)) return;
+    cfError = '';
+    const r = await fetch(`/admin/${provider}/logs/${action}`, {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+    });
+    const j = await r.json().catch(() => ({ ok: r.ok }));
+    if (!j.ok) {
+      cfError = j.error ?? `failed to ${action} ${provider} logs`;
+      return;
+    }
+    if (provider === 'vercel') {
+      vMapping = {};
+      vSync = null;
+      await loadV();
+    } else {
+      ghMapping = {};
+      ghSync = null;
+      await loadGh();
     }
   }
 
@@ -402,10 +431,18 @@
         {#if cfError}<p class="mt-2 text-xs text-destructive">{cfError}</p>{/if}
       </div>
     {/if}
-    {#if vercelConnected}
+    {#if vercelConnected && !vHidden}
       <div class="mb-3 rounded-xl border border-border bg-card p-3">
         <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>vercel projects → log names</span>
+          <span class="flex-1">vercel projects → log names</span>
+          {#if !Object.keys(vMapping).length}
+            <button
+              type="button"
+              title="Nothing mapped — remove Vercel from the log manager (deploy tracking stays connected)"
+              class="shrink-0 rounded-md px-1.5 py-0.5 hover:bg-muted hover:text-foreground"
+              onclick={() => toggleLogs('vercel', 'remove')}
+            >✕ remove</button>
+          {/if}
         </div>
         <div class="mb-2">
           <SearchSelect
@@ -501,10 +538,18 @@
         {/if}
       </div>
     {/if}
-    {#if ghConnected}
+    {#if ghConnected && !ghHidden}
       <div class="mb-3 rounded-xl border border-border bg-card p-3">
         <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>github actions → log names</span>
+          <span class="flex-1">github actions → log names</span>
+          {#if !Object.keys(ghMapping).length}
+            <button
+              type="button"
+              title="Nothing mapped — remove GitHub Actions from the log manager (deploy tracking stays connected)"
+              class="shrink-0 rounded-md px-1.5 py-0.5 hover:bg-muted hover:text-foreground"
+              onclick={() => toggleLogs('github', 'remove')}
+            >✕ remove</button>
+          {/if}
         </div>
         <p class="mb-2 text-xs text-muted-foreground">Maps a repo to a log source; the tick pulls recent workflow runs and failed-job lines every few minutes. Needs a token with Actions: read.</p>
         {#if Object.keys(ghMapping).length}
@@ -578,6 +623,16 @@
           </p>
         {/if}
       </div>
+    {/if}
+    {#if (vercelConnected && vHidden) || (ghConnected && ghHidden)}
+      <p class="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        {#if vercelConnected && vHidden}
+          <button type="button" class="rounded-md px-1.5 py-0.5 hover:bg-muted hover:text-foreground" onclick={() => toggleLogs('vercel', 'restore')}>+ vercel log sync</button>
+        {/if}
+        {#if ghConnected && ghHidden}
+          <button type="button" class="rounded-md px-1.5 py-0.5 hover:bg-muted hover:text-foreground" onclick={() => toggleLogs('github', 'restore')}>+ github actions log sync</button>
+        {/if}
+      </p>
     {/if}
     <form
       class="mb-3 grid gap-2 sm:grid-cols-4"
