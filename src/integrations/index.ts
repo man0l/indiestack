@@ -182,6 +182,10 @@ export async function setVercelMapping(env: Env, mapping: Record<string, unknown
     }
   }
   await setSetting(env.DB, "vercel_log_sources", JSON.stringify(clean));
+  // Nothing mapped -> the sync never runs again, so drop its last (possibly stale) error.
+  if (!Object.keys(clean).length) {
+    await env.DB.prepare("DELETE FROM settings WHERE key = 'vercel_log_last'").run().catch(() => {});
+  }
   return clean;
 }
 export type VercelLogEvent = { ts: number; level: string; message: string; project: string };
@@ -531,6 +535,9 @@ export async function setGithubMapping(env: Env, mapping: Record<string, unknown
     }
   }
   await setSetting(env.DB, "github_log_sources", JSON.stringify(clean));
+  if (!Object.keys(clean).length) {
+    await env.DB.prepare("DELETE FROM settings WHERE key = 'github_log_last'").run().catch(() => {});
+  }
   return clean;
 }
 

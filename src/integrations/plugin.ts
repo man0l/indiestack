@@ -296,7 +296,7 @@ export const integrations: Plugin = {
       // Also drop the log-sync mapping + its poll state, otherwise the 5-min
       // sync keeps running against a provider that is no longer connected.
       const keys = [`${p}_token`, `${p}_user`];
-      if (p !== "cloudflare") keys.push(`${p}_log_sources`, `${p}_log_poll_at`, `${p}_log_last`);
+      if (p !== "cloudflare") keys.push(`${p}_log_sources`, `${p}_log_poll_at`, `${p}_log_last`, `${p}_logs_hidden`);
       await env.DB.batch(keys.map((k) => env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(k)));
       return jsonOk(disabled ? `disconnected · disabled ${disabled} ${p} target(s)` : "disconnected");
     }
@@ -414,6 +414,26 @@ export const integrations: Plugin = {
       const saved = await setGithubMapping(env, raw as Record<string, string>);
       const n = Object.keys(saved).length;
       return jsonOk(n ? `${n} repo(s) mapped to log sources` : "mapping cleared");
+    }
+
+    // Log manager "remove": drop the log-sync block for a provider without
+    // disconnecting its token (deploy tracking keeps working). "restore" brings it back.
+    const logsToggle = path.match(/^\/admin\/(vercel|github)\/logs\/(remove|restore)$/);
+    if (logsToggle && method === "POST") {
+      const [, p, action] = logsToggle;
+      if (action === "remove") {
+        await env.DB.batch([
+          ...[`${p}_log_sources`, `${p}_log_poll_at`, `${p}_log_last`].map((k) =>
+            env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(k),
+          ),
+          env.DB.prepare(
+            "INSERT INTO settings (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+          ).bind(`${p}_logs_hidden`),
+        ]);
+        return jsonOk(`${p} log sync removed`);
+      }
+      await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(`${p}_logs_hidden`).run();
+      return jsonOk(`${p} log sync restored`);
     }
 
     const site = path.match(/^\/admin\/deploys\/targets\/([^/]+)\/site$/);
