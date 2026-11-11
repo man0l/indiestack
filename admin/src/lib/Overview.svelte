@@ -45,7 +45,7 @@
 {#if loading}
   <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
     {#each Array(8) as _, i (i)}
-      <Skeleton class="h-24 rounded-xl" />
+      <Skeleton class="h-[74px] rounded-4xl" />
     {/each}
   </div>
 {:else if cards.length === 0}
@@ -60,7 +60,7 @@
   <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
     {#each cards as c (c.id)}
       {@const Icon = icons[c.label]}
-      <a href={c.href} class="rounded-xl no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      <a href={c.href} class="rounded-4xl no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
         <Card.Root>
           <Card.Content class="p-3.5">
             <div class="flex items-center gap-1.5">

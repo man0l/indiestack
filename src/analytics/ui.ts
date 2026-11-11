@@ -8,7 +8,7 @@ function miniBars(days: Array<{ day: string; views: number; uniques: number }>):
     .map(
       (d) =>
         `<div style="display:inline-block;text-align:center;margin-right:10px;font:10px/1.4 ui-monospace,monospace;color:var(--mute)">
-           <div style="display:inline-block;width:10px;background:var(--accent);height:${Math.max(2, Math.round((d.views / max) * 36))}px;vertical-align:bottom"></div>
+           <div style="display:inline-block;width:10px;background:var(--lime);height:${Math.max(2, Math.round((d.views / max) * 36))}px;vertical-align:bottom"></div>
            <div>${d.day.slice(5)} · ${d.views}v</div>
            <div>${d.uniques}u</div>
          </div>`,

@@ -304,17 +304,17 @@ import { Input } from '$lib/components/ui/input';
         <span class="inline-flex items-center gap-1.5"><RefreshCwIcon data-icon="inline-start" /> refresh</span>
       </Button>
       {#if github.connected}
-        <Button onclick={() => (showAdd = showAdd === 'github' ? null : 'github')} disabled={busy !== ''}>
+        <Button variant="outline" onclick={() => (showAdd = showAdd === 'github' ? null : 'github')} disabled={busy !== ''}>
           <span class="inline-flex items-center gap-1.5"><PlusIcon data-icon="inline-start" /> add repos</span>
         </Button>
       {/if}
       {#if vercel.connected}
-        <Button onclick={() => (showAdd = showAdd === 'vercel' ? null : 'vercel')} disabled={busy !== ''}>
+        <Button variant="outline" onclick={() => (showAdd = showAdd === 'vercel' ? null : 'vercel')} disabled={busy !== ''}>
           <span class="inline-flex items-center gap-1.5"><PlusIcon data-icon="inline-start" /> vercel</span>
         </Button>
       {/if}
       {#if cloudflare.connected}
-        <Button onclick={() => (showAdd = showAdd === 'cfworkers' ? null : 'cfworkers')} disabled={busy !== ''}>
+        <Button variant="outline" onclick={() => (showAdd = showAdd === 'cfworkers' ? null : 'cfworkers')} disabled={busy !== ''}>
           <span class="inline-flex items-center gap-1.5"><PlusIcon data-icon="inline-start" /> workers</span>
         </Button>
       {/if}
@@ -628,7 +628,7 @@ import { Input } from '$lib/components/ui/input';
     {/if}
     <AlertDialog.Footer>
       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-      <Button onclick={confirmDisconnect} disabled={busy !== ''}>Disconnect</Button>
+      <Button variant="destructive" onclick={confirmDisconnect} disabled={busy !== ''}>Disconnect</Button>
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
