@@ -1,5 +1,4 @@
 import { getSetting } from "../kernel/db";
-import { trunc } from "../kernel/util";
 
 export const MAX_CRAWLS_PER_SITE_DAY = 5000;
 const KEEP_DAYS = 30;
@@ -108,14 +107,62 @@ export async function maybePruneCrawls(env: Env, now: number): Promise<void> {
     .run();
 }
 
+/** Cheap UA prefilter for the middleware so only bot-ish requests are forwarded. */
+const BOT_UA_SOURCE = [...VENDORS.map(([re]) => re.source), "bot", "crawl", "spider", "slurp"].join("|");
+
+/** Complete, runnable Cloudflare Worker middleware — never truncated, it is meant to be pasted. */
 export function ingestSnippet(origin: string, token: string): string {
-  return trunc(
-    `// in your own Worker's fetch handler — fire and forget:
-// ctx.waitUntil(fetch("${origin}/crawlers/${token}", {
-//   method: "POST",
-//   headers: { "content-type": "application/json" },
-//   body: JSON.stringify({ ua: request.headers.get("user-agent"), p: new URL(request.url).pathname }),
-// }).catch(() => {}));`,
-    600,
+  return `// indiestack AI-crawler tracking — paste into your Worker's entry file.
+const INDIESTACK_CRAWLERS = "${origin}/crawlers/${token}";
+const BOT_UA = /${BOT_UA_SOURCE}/i;
+
+// Fire and forget: never delays or breaks your response.
+function trackCrawler(request, ctx) {
+  const ua = request.headers.get("user-agent") || "";
+  if (!BOT_UA.test(ua)) return;
+  ctx.waitUntil(
+    fetch(INDIESTACK_CRAWLERS, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ua, p: new URL(request.url).pathname }),
+    }).catch(() => {}),
   );
+}
+
+// Then call it as the first line of your existing fetch handler:
+// export default {
+//   async fetch(request, env, ctx) {
+//     trackCrawler(request, ctx);
+//     ...your existing code, unchanged...
+//   },
+// };`;
+}
+
+/** Copy-pastable instruction for an AI coding agent working in the site's repo (any stack). */
+export function agentInstructions(origin: string, token: string, siteName: string): string {
+  const endpoint = `${origin}/crawlers/${token}`;
+  return `Add server-side AI-crawler tracking to this project (site: ${siteName}). AI crawlers (GPTBot, ClaudeBot, PerplexityBot, …) do not run JavaScript, so this must run on the server/edge for every incoming page request, not in the browser.
+
+Requirement: for each incoming HTTP request whose User-Agent matches this regex (case-insensitive)
+  /${BOT_UA_SOURCE}/i
+send, without awaiting it and without ever failing or delaying the response:
+  POST ${endpoint}
+  Content-Type: application/json
+  Body: {"ua": "<full User-Agent header>", "p": "<request path only, no query string, starting with />"}
+Swallow every error from this call. Requests whose User-Agent does not match must not be sent. The endpoint always answers 204.
+
+Pick the hook that matches this project's stack, and edit the existing entry point instead of replacing it:
+- Cloudflare Worker: in the module's fetch(request, env, ctx) handler, call ctx.waitUntil(fetch(...).catch(() => {})) as the first statement.
+- Cloudflare Pages: add or extend functions/_middleware.(js|ts) with onRequest(context) that calls context.waitUntil(fetch(...).catch(() => {})) and then returns context.next().
+- Next.js (Vercel or self-hosted): add or extend middleware.(ts|js) at the project root (or src/) with export function middleware(request, event) that calls event.waitUntil(fetch(...).catch(() => {})) and returns NextResponse.next(); keep any existing matcher and logic, and make sure the matcher includes page routes.
+- Astro / SvelteKit / Nuxt / Remix / other SSR frameworks: use the framework's server middleware or request hook and the platform's waitUntil if one exists; otherwise call fetch(...).catch(() => {}) without await.
+- Express / Fastify / Koa / other Node servers: register a middleware before the routes that calls fetch(...).catch(() => {}) without await and then next().
+- Purely static site with no server layer: say so, and add the smallest edge layer the host supports (e.g. Cloudflare Pages functions/_middleware.js, Vercel middleware.ts, Netlify edge function) rather than client-side JavaScript.
+
+Do not change any other behaviour, do not add dependencies, keep the endpoint URL exactly as written above, and do not log the User-Agent anywhere else.
+
+Verify after deploying:
+  curl -s -o /dev/null -A "GPTBot/1.0" https://<your-domain>/
+The indiestack admin → ai crawlers → ${siteName} card should list "openai-gptbot" after a refresh. To check the endpoint alone (records one test hit):
+  curl -i -X POST "${endpoint}" -H "content-type: application/json" -d '{"ua":"GPTBot/1.0","p":"/indiestack-test"}'`;
 }

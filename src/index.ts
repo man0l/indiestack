@@ -27,7 +27,7 @@ import { goalStats, listGoals } from "./goals/plugin";
 import { siteStats } from "./analytics/index";
 import { parseQuery, queryLogs } from "./explorer/query";
 import { listSignals, listWatchers } from "./signals/index";
-import { crawlSummary, ingestSnippet } from "./aicrawl/index";
+import { agentInstructions, crawlSummary, ingestSnippet } from "./aicrawl/index";
 import { parseHttpUrl } from "./kernel/util";
 import { adminShell, ago, html, loginPage, overallOf, revealPage, settingsCard, statusPage } from "./ui";
 
@@ -496,6 +496,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
         name: site.name,
         ...(await crawlSummary(env, site.id)),
         snippet: ingestSnippet(origin, site.token),
+        agentPrompt: agentInstructions(origin, site.token, site.name),
       });
     }
     return Response.json({ sites: crawlSites });

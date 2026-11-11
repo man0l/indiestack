@@ -1,7 +1,7 @@
 import type { Plugin, RouteCtx, SectionCtx } from "../kernel/plugin";
 import { esc } from "../ui";
 import { listAnalyticsSites, siteByToken } from "../analytics";
-import { classifyCrawler, crawlSummary, ingestSnippet, maybePruneCrawls } from "./index";
+import { agentInstructions, classifyCrawler, crawlSummary, ingestSnippet, maybePruneCrawls } from "./index";
 
 export const aicrawl: Plugin = {
   id: "aicrawl",
@@ -38,7 +38,9 @@ export const aicrawl: Plugin = {
             <div><b>AI referrals</b>${refRows}</div>
           </div>
           <p class="sub" style="margin:10px 0 0">middleware for this site's Worker:</p>
-          <div class="url" style="white-space:pre-wrap">${esc(ingestSnippet(ctx.origin, site.token))}</div>
+          <pre class="url" style="white-space:pre-wrap">${esc(ingestSnippet(ctx.origin, site.token))}</pre>
+          <p class="sub" style="margin:10px 0 0">or paste this to your AI coding agent (any stack):</p>
+          <pre class="url" style="white-space:pre-wrap">${esc(agentInstructions(ctx.origin, site.token, site.name))}</pre>
         </div>`);
     }
     return `<h2>ai crawlers</h2>
