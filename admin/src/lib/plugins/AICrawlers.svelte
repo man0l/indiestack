@@ -8,7 +8,7 @@
   import * as Empty from '$lib/components/ui/empty';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import FolderIcon from '@lucide/svelte/icons/folder';
-  import CopyBlock from './CopyBlock.svelte';
+  import InstallGuide, { type Guide } from './InstallGuide.svelte';
 
   type CrawlSite = {
     id: string;
@@ -16,8 +16,7 @@
     byVendor: Array<{ vendor: string; n: number; last_ts: number }>;
     topPaths: Array<{ path: string; n: number }>;
     referrals: Array<{ ref: string; views: number }>;
-    snippet: string;
-    agentPrompt: string;
+    guide: Guide;
   };
 
   let sites: CrawlSite[] = $state([]);
@@ -63,7 +62,7 @@
         </Button>
       </div>
     </div>
-    <Card.Description>Server-side AI crawler tracking plus AI referrals. Other bots land under other-bot.</Card.Description>
+    <Card.Description>Server-side AI crawler tracking (indiestack-ai-bots npm package) plus AI referrals.</Card.Description>
   </Card.Header>
   <Card.Content>
     {#if loading}
@@ -116,8 +115,7 @@
                 {/if}
               </div>
             </div>
-            <CopyBlock label="paste to your AI coding agent (any stack: Workers, Pages, Next.js, Node…)" text={s.agentPrompt} copyLabel="copy prompt" />
-            <CopyBlock label="or paste this middleware into your Cloudflare Worker yourself" text={s.snippet} copyLabel="copy code" />
+            <InstallGuide guide={s.guide} />
           </div>
         {/each}
       </div>

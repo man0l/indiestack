@@ -1,13 +1,13 @@
 import type { Plugin, RouteCtx, SectionCtx } from "../kernel/plugin";
 import { esc } from "../ui";
 import { listAnalyticsSites, siteByToken } from "../analytics";
-import { agentInstructions, classifyCrawler, crawlSummary, ingestSnippet, maybePruneCrawls } from "./index";
+import { classifyCrawler, crawlSummary, installGuide, maybePruneCrawls } from "./index";
 
 export const aicrawl: Plugin = {
   id: "aicrawl",
   adminNav: { group: "growth", label: "ai crawlers" },
   deps: ["analytics"],
-  adminFooter: "AI crawlers are recorded server-side — paste the middleware into the Workers you own. Other bots land under other-bot.",
+  adminFooter: "AI crawlers are recorded server-side by the indiestack-ai-bots npm package. Other bots land under other-bot.",
   async adminSection(ctx: SectionCtx) {
     const sites = await listAnalyticsSites(ctx.env.DB);
     const blocks = [];
@@ -37,10 +37,10 @@ export const aicrawl: Plugin = {
             <div><b>top crawled paths</b>${pathRows}</div>
             <div><b>AI referrals</b>${refRows}</div>
           </div>
-          <p class="sub" style="margin:10px 0 0">middleware for this site's Worker:</p>
-          <pre class="url" style="white-space:pre-wrap">${esc(ingestSnippet(ctx.origin, site.token))}</pre>
-          <p class="sub" style="margin:10px 0 0">or paste this to your AI coding agent (any stack):</p>
-          <pre class="url" style="white-space:pre-wrap">${esc(agentInstructions(ctx.origin, site.token, site.name))}</pre>
+          <details style="margin-top:10px">
+            <summary class="sub">install tracking (npm i indiestack-ai-bots) — AI-agent prompt</summary>
+            <pre class="url" style="white-space:pre-wrap">${esc(installGuide(ctx.origin, site.token, site.name).prompt)}</pre>
+          </details>
         </div>`);
     }
     return `<h2>ai crawlers</h2>

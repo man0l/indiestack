@@ -69,13 +69,16 @@ export async function crawlSummary(
   days = 30,
 ): Promise<{ byVendor: CrawlRow[]; topPaths: Array<{ path: string; n: number }>; referrals: Array<{ ref: string; views: number }> }> {
   const sinceDay = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  // Legacy /crawlers/<token> middleware rows plus indiestack-ai-bots package rows.
+  const allCrawls = `(SELECT vendor, path, ts FROM crawls WHERE site_id = ?1 AND day >= ?2
+     UNION ALL SELECT crawler AS vendor, path, ts FROM crawler_fetches WHERE site_id = ?1 AND day >= ?2)`;
   const [byVendor, topPaths, referrals] = await env.DB.batch([
     env.DB.prepare(
       `SELECT vendor, COUNT(*) AS n, MAX(ts) AS last_ts
-       FROM crawls WHERE site_id = ? AND day >= ? GROUP BY vendor ORDER BY n DESC`,
+       FROM ${allCrawls} GROUP BY vendor ORDER BY n DESC`,
     ).bind(siteId, sinceDay),
     env.DB.prepare(
-      `SELECT path, COUNT(*) AS n FROM crawls WHERE site_id = ? AND day >= ?
+      `SELECT path, COUNT(*) AS n FROM ${allCrawls}
        GROUP BY path ORDER BY n DESC LIMIT 8`,
     ).bind(siteId, sinceDay),
     // AI referrals come from the analytics base: hits whose referrer is an AI product.
@@ -107,62 +110,120 @@ export async function maybePruneCrawls(env: Env, now: number): Promise<void> {
     .run();
 }
 
-/** Cheap UA prefilter for the middleware so only bot-ish requests are forwarded. */
-const BOT_UA_SOURCE = [...VENDORS.map(([re]) => re.source), "bot", "crawl", "spider", "slurp"].join("|");
+export const AI_BOTS_PACKAGE = "indiestack-ai-bots";
+const DEFAULT_ENDPOINT = "https://indiestack.manol-trendafilov.workers.dev";
 
-/** Complete, runnable Cloudflare Worker middleware — never truncated, it is meant to be pasted. */
-export function ingestSnippet(origin: string, token: string): string {
-  return `// indiestack AI-crawler tracking — paste into your Worker's entry file.
-const INDIESTACK_CRAWLERS = "${origin}/crawlers/${token}";
-const BOT_UA = /${BOT_UA_SOURCE}/i;
+export type InstallSnippet = { id: string; label: string; file: string; code: string };
+export type InstallGuide = { install: string; snippets: InstallSnippet[]; prompt: string };
 
-// Fire and forget: never delays or breaks your response.
-function trackCrawler(request, ctx) {
-  const ua = request.headers.get("user-agent") || "";
-  if (!BOT_UA.test(ua)) return;
-  ctx.waitUntil(
-    fetch(INDIESTACK_CRAWLERS, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ua, p: new URL(request.url).pathname }),
-    }).catch(() => {}),
-  );
+/**
+ * Install guide for the indiestack-ai-bots npm package: per-stack code plus a
+ * prompt for an AI coding agent. Every snippet is complete — never truncated.
+ */
+export function installGuide(origin: string, token: string, siteName: string): InstallGuide {
+  const opts =
+    origin.replace(/\/$/, "") === DEFAULT_ENDPOINT
+      ? `{ websiteId: "${token}" }`
+      : `{ websiteId: "${token}", endpoint: "${origin}" }`;
+  const install = `npm install ${AI_BOTS_PACKAGE}`;
+  const snippets: InstallSnippet[] = [
+    {
+      id: "nextjs",
+      label: "Next.js",
+      file: "middleware.ts (proxy.ts on Next.js 16+)",
+      code: `import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { trackAIBotRequest } from "${AI_BOTS_PACKAGE}";
+
+// Next.js 16+: name this file proxy.ts and the function proxy.
+export async function middleware(request: NextRequest, event: NextFetchEvent) {
+  await trackAIBotRequest(request, event, ${opts});
+  return NextResponse.next();
 }
 
-// Then call it as the first line of your existing fetch handler:
-// export default {
-//   async fetch(request, env, ctx) {
-//     trackCrawler(request, ctx);
-//     ...your existing code, unchanged...
-//   },
-// };`;
-}
+// Run on pages, skip Next.js internals and static files.
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+};`,
+    },
+    {
+      id: "worker",
+      label: "Cloudflare Worker",
+      file: "src/index.ts (your Worker entry)",
+      code: `import { withAIBotTracking } from "${AI_BOTS_PACKAGE}";
 
-/** Copy-pastable instruction for an AI coding agent working in the site's repo (any stack). */
-export function agentInstructions(origin: string, token: string, siteName: string): string {
-  const endpoint = `${origin}/crawlers/${token}`;
-  return `Add server-side AI-crawler tracking to this project (site: ${siteName}). AI crawlers (GPTBot, ClaudeBot, PerplexityBot, …) do not run JavaScript, so this must run on the server/edge for every incoming page request, not in the browser.
+const app = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // ...your existing fetch handler, unchanged...
+    return new Response("ok");
+  },
+};
 
-Requirement: for each incoming HTTP request whose User-Agent matches this regex (case-insensitive)
-  /${BOT_UA_SOURCE}/i
-send, without awaiting it and without ever failing or delaying the response:
-  POST ${endpoint}
-  Content-Type: application/json
-  Body: {"ua": "<full User-Agent header>", "p": "<request path only, no query string, starting with />"}
-Swallow every error from this call. Requests whose User-Agent does not match must not be sent. The endpoint always answers 204.
+export default {
+  fetch: withAIBotTracking((request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, env, ctx), ${opts}),
+};`,
+    },
+    {
+      id: "pages",
+      label: "Cloudflare Pages",
+      file: "functions/_middleware.ts",
+      code: `import { trackAIBotResponse } from "${AI_BOTS_PACKAGE}";
 
-Pick the hook that matches this project's stack, and edit the existing entry point instead of replacing it:
-- Cloudflare Worker: in the module's fetch(request, env, ctx) handler, call ctx.waitUntil(fetch(...).catch(() => {})) as the first statement.
-- Cloudflare Pages: add or extend functions/_middleware.(js|ts) with onRequest(context) that calls context.waitUntil(fetch(...).catch(() => {})) and then returns context.next().
-- Next.js (Vercel or self-hosted): add or extend middleware.(ts|js) at the project root (or src/) with export function middleware(request, event) that calls event.waitUntil(fetch(...).catch(() => {})) and returns NextResponse.next(); keep any existing matcher and logic, and make sure the matcher includes page routes.
-- Astro / SvelteKit / Nuxt / Remix / other SSR frameworks: use the framework's server middleware or request hook and the platform's waitUntil if one exists; otherwise call fetch(...).catch(() => {}) without await.
-- Express / Fastify / Koa / other Node servers: register a middleware before the routes that calls fetch(...).catch(() => {}) without await and then next().
-- Purely static site with no server layer: say so, and add the smallest edge layer the host supports (e.g. Cloudflare Pages functions/_middleware.js, Vercel middleware.ts, Netlify edge function) rather than client-side JavaScript.
+export const onRequest: PagesFunction = async (context) => {
+  const response = await context.next();
+  await trackAIBotResponse(context.request, response, context, ${opts});
+  return response;
+};`,
+    },
+    {
+      id: "express",
+      label: "Express / Node",
+      file: "server.ts (before your routes)",
+      code: `import { trackAIBotRequest } from "${AI_BOTS_PACKAGE}";
 
-Do not change any other behaviour, do not add dependencies, keep the endpoint URL exactly as written above, and do not log the User-Agent anywhere else.
+app.use((req, res, next) => {
+  // Express requests are not web Requests: build one with the fields the package reads.
+  const request = new Request(\`\${req.protocol}://\${req.get("host")}\${req.originalUrl}\`, {
+    headers: { "user-agent": req.get("user-agent") ?? "", "x-real-ip": req.ip ?? "" },
+  });
+  trackAIBotRequest(request, undefined, ${opts}).catch(() => {});
+  next();
+});`,
+    },
+    {
+      id: "hono",
+      label: "Hono",
+      file: "src/index.ts (before your routes)",
+      code: `import { trackAIBotResponse } from "${AI_BOTS_PACKAGE}";
 
-Verify after deploying:
-  curl -s -o /dev/null -A "GPTBot/1.0" https://<your-domain>/
-The indiestack admin → ai crawlers → ${siteName} card should list "openai-gptbot" after a refresh. To check the endpoint alone (records one test hit):
-  curl -i -X POST "${endpoint}" -H "content-type: application/json" -d '{"ua":"GPTBot/1.0","p":"/indiestack-test"}'`;
+app.use("*", async (c, next) => {
+  await next();
+  let ctx: unknown;
+  try {
+    ctx = c.executionCtx; // Workers/Bun: lets tracking finish after the response
+  } catch {
+    ctx = undefined; // Node: no execution context
+  }
+  await trackAIBotResponse(c.req.raw, c.res, ctx, ${opts});
+});`,
+    },
+  ];
+
+  const prompt = `Install server-side AI-crawler tracking in this project (indiestack site: ${siteName}) using the npm package "${AI_BOTS_PACKAGE}".
+
+AI crawlers (GPTBot, ClaudeBot, PerplexityBot, …) do not run JavaScript, so this must run on the server/edge for incoming page requests — not in the browser. The package filters locally (only known AI bots on document paths are reported), never throws, and uses waitUntil when the runtime provides one.
+
+1. Run: ${install}
+2. Find this project's server/edge entry point and wire the package in, keeping all existing logic and exports. Use the site token "${token}"${opts.includes("endpoint") ? ` and endpoint "${origin}"` : ""}.
+
+${snippets.map((s) => `--- ${s.label} — ${s.file}\n${s.code}`).join("\n\n")}
+
+Other stacks (Astro, SvelteKit, Nuxt, Remix, Fastify, …): call trackAIBotRequest(request, contextWithWaitUntilOrUndefined, ${opts}) from the framework's server middleware/request hook, passing a web-standard Request.
+Purely static site with no server layer: say so and add the smallest edge layer the host supports (Cloudflare Pages functions/_middleware.ts, Vercel middleware.ts, Netlify edge function) — not client-side JavaScript.
+
+3. Do not change any other behaviour and do not add other dependencies.
+4. Verify after deploying:
+   curl -s -o /dev/null -A "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)" https://<your-domain>/
+   Then refresh indiestack admin → ai crawlers → ${siteName}: "GPTBot" should be listed.`;
+
+  return { install, snippets, prompt };
 }
