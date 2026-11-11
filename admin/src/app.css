@@ -23,7 +23,7 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  --radius: 0.5rem;
   /* IndieStack status tokens beyond primary/destructive */
   --success: oklch(0.62 0.17 155);
   --success-foreground: oklch(0.985 0 0);
@@ -92,21 +92,35 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  /* Rhea's 2xl–4xl were pill-ish (18–26px). Controls (2xl) sit at 10px,
+     overlays (3xl) 12px, cards and dialogs (4xl) 14px — the shell's scale. */
+  --radius-xl: 10px;
+  --radius-2xl: 10px;
+  --radius-3xl: 12px;
+  --radius-4xl: 14px;
 }
 
 /* minimal base utilities assume (preflight is not imported) */
-*, ::before, ::after {
-  box-sizing: border-box;
-  border-width: 0;
-  border-style: solid;
-  border-color: var(--border);
+/* Layered, so utilities win: unlayered, `border-width: 0` beat every `border`
+   utility and islands rendered with no borders at all. */
+@layer base {
+  *, ::before, ::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--border);
+  }
+  svg { display: block; }
+  body { background: var(--background); }
+  /* No preflight: without this, ghost buttons paint the UA `buttonface` grey
+     and controls fall back to the system font. */
+  button, input, select, textarea {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    background-color: transparent;
+  }
 }
-svg { display: block; }
-body { background: var(--background); }
 
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
@@ -115,44 +129,46 @@ body { background: var(--background); }
 @custom-variant dark (&:is(.dark *));
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* One palette with the Worker shell (src/ui.ts): cool ink-blue neutrals,
+     lime reserved for primary actions, focus and selection. */
+  --background: #0e1014;
+  --foreground: #eef0f4;
+  --card: #171a21;
+  --card-foreground: #eef0f4;
+  --popover: #1c1f27;
+  --popover-foreground: #eef0f4;
+  --primary: #c8f542;
+  --primary-foreground: #14170a;
+  --secondary: #232731;
+  --secondary-foreground: #eef0f4;
+  --muted: #1f232b;
+  --muted-foreground: #8b919c;
+  --accent: #262b35;
+  --accent-foreground: #eef0f4;
+  --destructive: #ff5d57;
+  --destructive-foreground: #1f0605;
+  --border: #262b35;
+  --input: #2f3544;
+  --ring: #c8f542;
   --success: #3ee08f;
   --success-foreground: #06281a;
   --warning: #e6c15c;
   --warning-foreground: #2a2003;
   --surface: #1c1f26;
   --surface-foreground: #eef0f4;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --chart-1: #d4d8df;
+  --chart-2: #8b919c;
+  --chart-3: #646a76;
+  --chart-4: #464c58;
+  --chart-5: #2f3544;
+  --sidebar: #0c0d10;
+  --sidebar-foreground: #eef0f4;
+  --sidebar-primary: #c8f542;
+  --sidebar-primary-foreground: #14170a;
+  --sidebar-accent: #171a21;
+  --sidebar-accent-foreground: #eef0f4;
+  --sidebar-border: #262b35;
+  --sidebar-ring: #c8f542;
 }
 
 @layer base {

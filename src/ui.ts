@@ -60,9 +60,12 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
       --up: #3ee08f;
       --down: #ff5d57;
       --wait: #e6c15c;
-      --accent: #c8f542;
+      --lime: #c8f542;
+      --accent: var(--lime);
     }
     * { box-sizing: border-box; }
+    ::selection { background: color-mix(in srgb, var(--lime) 32%, transparent); color: var(--ink); }
+    input, textarea { caret-color: var(--lime); }
     body {
       margin: 0;
       min-height: 100dvh;
@@ -71,10 +74,10 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
       font: 15px/1.45 "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
     a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
-      outline: 2px solid var(--accent);
+      outline: 2px solid var(--lime);
       outline-offset: 2px;
     }
-    :where(body:not(.isl)) a { color: var(--accent); text-decoration: none; }
+    :where(body:not(.isl)) a { color: var(--lime); text-decoration: none; }
     :where(body:not(.isl)) a:hover { text-decoration: underline; }
     main { max-width: 720px; margin: 0 auto; padding: 28px 20px 64px; }
     header {
@@ -117,7 +120,7 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
     form.rowish, .card {
       background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 16px;
       margin: 16px 0;
     }
@@ -126,7 +129,7 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
       width: 100%;
       margin-top: 4px;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: 10px;
       border: 1px solid var(--line);
       background: var(--bg);
       color: var(--ink);
@@ -136,8 +139,8 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
        mounts (body.isl) shadcn components own their look; shell chrome re-opts
        in via #check-form so it never leaks into islands or portal'ed overlays. */
     :where(body:not(.isl)) button, #check-form button, .btn {
-      appearance: none; border: 0; border-radius: 8px;
-      background: var(--accent); color: #111; font-weight: 650;
+      appearance: none; border: 0; border-radius: 10px;
+      background: var(--lime); color: #14170a; font-weight: 650;
       padding: 8px 12px; cursor: pointer; font: inherit;
     }
     button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
@@ -186,7 +189,7 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
     }
     .sbrand { font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; padding: 4px 8px; }
     .sbrand span { color: var(--mute); font-weight: 500; }
-    .sg { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); margin: 14px 0 6px; padding: 0 8px; }
+    .sg { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mute); margin: 14px 0 6px; padding: 0 8px; }
     .sitem, .ditem {
       display: flex; align-items: center; gap: 8px;
       padding: 10px 12px; border-radius: 8px; color: #a8adb7; font-size: 14px; text-decoration: none;
@@ -211,25 +214,25 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
     }
     .abrand { font-weight: 700; letter-spacing: -0.02em; display: none; }
     .abrand span { color: var(--mute); font-weight: 500; }
-    .atitle { display: none; color: var(--mute); font-size: 13px; }
+    .atitle { display: none; color: var(--ink); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
     @media (min-width: 1024px) {
       .atitle { display: block; }
     }
     .atop .spacer { flex: 1; }
     .flash { color: var(--mute); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .island-err {
-      border: 1px solid var(--down); border-radius: 12px;
+      border: 1px solid var(--down); border-radius: 14px;
       background: color-mix(in srgb, var(--down) 12%, transparent);
       color: var(--ink); padding: 12px 14px; margin-bottom: 16px; font-size: 14px;
     }
     .island-err b { color: var(--down); }
-    .sghost { background: transparent; color: var(--mute); border: 1px solid var(--line); padding: 6px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
+    .sghost { background: transparent; color: var(--mute); border: 1px solid var(--line); padding: 6px 10px; border-radius: 10px; cursor: pointer; font: inherit; }
     /* drawer (mobile nav): <details> so it works with no JS */
     .drawer { display: none; }
     .topbar-island { display: none; }
     .dbtn {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 44px; height: 44px; border-radius: 8px; cursor: pointer;
+      width: 44px; height: 44px; border-radius: 10px; cursor: pointer;
       border: 1px solid var(--line); background: transparent; color: var(--ink);
       list-style: none; flex-shrink: 0;
     }
@@ -258,7 +261,7 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
     }
     .pcard {
       display: block; text-decoration: none; color: inherit;
-      background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
     }
     .pcard:hover { text-decoration: none; border-color: #2f3544; }
     .pcard b { display: block; font-size: 14px; }
@@ -448,9 +451,8 @@ export function adminShell(opts: {
         <div class="acontent">${opts.island ? `<div class="dark" data-island="${esc(opts.island)}"><div class="island-loading flex flex-col gap-2" aria-hidden="true"><div class="h-12 animate-pulse rounded-lg bg-muted"></div><div class="h-12 animate-pulse rounded-lg bg-muted"></div><div class="h-12 animate-pulse rounded-lg bg-muted"></div></div><noscript><style>.island-loading{display:none}</style>${opts.content}</noscript></div><noscript><div class="island-err"><b>JavaScript is off.</b> Server pages work, but live tables need the admin bundle.</div></noscript><script>(function(){if(!document.querySelector('[data-island]'))return;setTimeout(function(){if(window.__isl)return;var d=document.createElement('div');d.className='island-err';d.setAttribute('role','alert');d.innerHTML='<b>Interactive dashboard failed to load.</b> Reload the page — if this persists, the admin bundle is unreachable.';var c=document.querySelector('.acontent');if(c)c.prepend(d);},6000);})();</script>` : `<div class="dark">${opts.content}</div>`}</div>
       </div>
     </div>`,
-    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><link rel="stylesheet" href="${ADMIN_CSS}"/><script type="module" src="${ADMIN_JS}"></script><style>/* admin.css loads after the shell: re-assert the dark canvas + shell tokens it collides with (--card/--accent). Islands always render inside .dark, so their tokens are untouched. */
-    html,body{background:#0e1014;color:#eef0f4}
-    :root{--card:#171a21;--accent:#c8f542}</style>`,
+    `<style>main{max-width:none;margin:0;padding:0;background:transparent}</style><link rel="stylesheet" href="${ADMIN_CSS}"/><script type="module" src="${ADMIN_JS}"></script><style>/* admin.css loads after the shell: re-assert the dark canvas. Its .dark tokens (on <html>) match the shell palette, and shell chrome reads --lime, never shadcn's --accent hover surface. */
+    html,body{background:#0e1014;color:#eef0f4}</style>`,
     "dark",
   );
 }
