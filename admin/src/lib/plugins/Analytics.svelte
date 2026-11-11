@@ -18,6 +18,7 @@
   import EyeIcon from '@lucide/svelte/icons/eye';
   import EyeOffIcon from '@lucide/svelte/icons/eye-off';
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+  import CopyBlock from './CopyBlock.svelte';
   import ConfirmDelete from './ConfirmDelete.svelte';
   import SiteChart from './SiteChart.svelte';
 
@@ -248,7 +249,7 @@
                 {/if}
               </div>
             </div>
-            <div class="mt-2 truncate font-mono text-xs text-muted-foreground">{s.snippet}</div>
+            <CopyBlock label="paste into every page's <head>" text={s.snippet} copyLabel="copy snippet" />
             <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">ai referrals</div>
@@ -275,7 +276,7 @@
                 {/if}
               </div>
             </div>
-            <div class="mt-2 truncate font-mono text-xs text-muted-foreground">{s.snippet}</div>
+            <CopyBlock label="paste into every page's <head>" text={s.snippet} copyLabel="copy snippet" />
           </div>
         {/each}
       </div>

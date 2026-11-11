@@ -8,6 +8,7 @@
   import * as Empty from '$lib/components/ui/empty';
   import { Skeleton } from '$lib/components/ui/skeleton';
   import FolderIcon from '@lucide/svelte/icons/folder';
+  import CopyBlock from './CopyBlock.svelte';
 
   type CrawlSite = {
     id: string;
@@ -16,6 +17,7 @@
     topPaths: Array<{ path: string; n: number }>;
     referrals: Array<{ ref: string; views: number }>;
     snippet: string;
+    agentPrompt: string;
   };
 
   let sites: CrawlSite[] = $state([]);
@@ -114,8 +116,8 @@
                 {/if}
               </div>
             </div>
-            <p class="mt-3 text-xs text-muted-foreground">middleware for this site's Worker:</p>
-            <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{s.snippet}</div>
+            <CopyBlock label="paste to your AI coding agent (any stack: Workers, Pages, Next.js, Node…)" text={s.agentPrompt} copyLabel="copy prompt" />
+            <CopyBlock label="or paste this middleware into your Cloudflare Worker yourself" text={s.snippet} copyLabel="copy code" />
           </div>
         {/each}
       </div>
