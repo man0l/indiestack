@@ -101,14 +101,26 @@
 }
 
 /* minimal base utilities assume (preflight is not imported) */
-*, ::before, ::after {
-  box-sizing: border-box;
-  border-width: 0;
-  border-style: solid;
-  border-color: var(--border);
+/* Layered, so utilities win: unlayered, `border-width: 0` beat every `border`
+   utility and islands rendered with no borders at all. */
+@layer base {
+  *, ::before, ::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--border);
+  }
+  svg { display: block; }
+  body { background: var(--background); }
+  /* No preflight: without this, ghost buttons paint the UA `buttonface` grey
+     and controls fall back to the system font. */
+  button, input, select, textarea {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    background-color: transparent;
+  }
 }
-svg { display: block; }
-body { background: var(--background); }
 
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
