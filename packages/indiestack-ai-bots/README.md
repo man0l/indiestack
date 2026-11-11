@@ -12,15 +12,14 @@ npm install indiestack-ai-bots
 
 ## Usage
 
-### Next.js (proxy.ts / middleware)
+### Next.js (middleware.ts, or proxy.ts on Next.js 16+)
 
 ```ts
-import { trackAIBotRequest, type NextRequestWithWaitUntil } from "indiestack-ai-bots";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { trackAIBotRequest } from "indiestack-ai-bots";
 
-export async function proxy(request: NextRequestWithWaitUntil) {
-  await trackAIBotRequest(request, request, {
-    websiteId: process.env.INDIESTACK_SITE_ID!,
-  });
+export async function middleware(request: NextRequest, event: NextFetchEvent) {
+  await trackAIBotRequest(request, event, { websiteId: "your-site-token" });
   return NextResponse.next();
 }
 ```
@@ -31,18 +30,52 @@ export async function proxy(request: NextRequestWithWaitUntil) {
 import { withAIBotTracking } from "indiestack-ai-bots";
 
 export default {
-  fetch: withAIBotTracking(myHandler, { websiteId: "your-site-token" }),
+  fetch: withAIBotTracking((request, env, ctx) => myHandler(request, env, ctx), { websiteId: "your-site-token" }),
 };
 ```
 
-### Hono / Express / anything else
+### Cloudflare Pages (functions/_middleware.ts)
+
+```ts
+import { trackAIBotResponse } from "indiestack-ai-bots";
+
+export const onRequest: PagesFunction = async (context) => {
+  const response = await context.next();
+  await trackAIBotResponse(context.request, response, context, { websiteId: "your-site-token" });
+  return response;
+};
+```
+
+### Express / Node
+
+Express requests are not web `Request`s, so build one with the fields the package reads:
 
 ```ts
 import { trackAIBotRequest } from "indiestack-ai-bots";
 
-app.use(async (req, res, next) => {
-  await trackAIBotRequest(req as unknown as Request, undefined, { websiteId: "your-site-token" });
+app.use((req, res, next) => {
+  const request = new Request(`${req.protocol}://${req.get("host")}${req.originalUrl}`, {
+    headers: { "user-agent": req.get("user-agent") ?? "", "x-real-ip": req.ip ?? "" },
+  });
+  trackAIBotRequest(request, undefined, { websiteId: "your-site-token" }).catch(() => {});
   next();
+});
+```
+
+### Hono
+
+```ts
+import { trackAIBotResponse } from "indiestack-ai-bots";
+
+app.use("*", async (c, next) => {
+  await next();
+  let ctx: unknown;
+  try {
+    ctx = c.executionCtx;
+  } catch {
+    ctx = undefined;
+  }
+  await trackAIBotResponse(c.req.raw, c.res, ctx, { websiteId: "your-site-token" });
 });
 ```
 
