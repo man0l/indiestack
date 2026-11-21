@@ -14,6 +14,7 @@ import {
 import { PLUGINS } from "./kernel/catalog";
 import { getSettings, setSetting } from "./kernel/db";
 import { redirect } from "./kernel/http";
+import { finishGoogleLogin, googleConfig, startGoogleLogin } from "./kernel/google";
 import { collect, dispatch, firstKicker, sumHealth } from "./kernel/plugin";
 import { runTick } from "./kernel/tick";
 import { ingestAIBotEvent, type AIBotEventIn } from "./analytics/crawlers";
@@ -630,6 +631,18 @@ async function handle(request: Request, env: Env): Promise<Response> {
   if (ctx.path === "/login" && ctx.method === "POST") {
     return login(request, env);
   }
+  if (ctx.path === "/auth/google" && ctx.method === "GET") {
+    const cfg = googleConfig(env);
+    if (!cfg) return new Response("google login not configured", { status: 404 });
+    return startGoogleLogin(request, cfg);
+  }
+  if (ctx.path === "/auth/google/callback" && ctx.method === "GET") {
+    const cfg = googleConfig(env);
+    if (!cfg) return new Response("google login not configured", { status: 404 });
+    const r = await finishGoogleLogin(request, env, cfg);
+    if (!r.ok) return html(loginPage(env.APP_NAME, r.error, true), 401);
+    return new Response(null, { status: 303, headers: r.headers });
+  }
   if (ctx.path === "/logout" && ctx.method === "POST") {
     return redirect("/", { "set-cookie": clearCookie(request) });
   }
@@ -834,8 +847,9 @@ async function saveSettings(request: Request, env: Env): Promise<Response> {
 }
 
 async function login(request: Request, env: Env): Promise<Response> {
+  const google = googleConfig(env) !== null;
   const expected = await resolveAdminToken(env);
-  if (!expected) {
+  if (!expected && !google) {
     const minted = await mintAdminToken(env);
     if (minted.created) return html(revealPage(env.APP_NAME, minted.token));
   }
@@ -843,20 +857,23 @@ async function login(request: Request, env: Env): Promise<Response> {
   const token = String(form.get("token") ?? "");
   const want = (await resolveAdminToken(env)) ?? "";
   if (!want || !(await safeEqual(token, want))) {
-    return html(loginPage(env.APP_NAME, "wrong token"), 401);
+    return html(loginPage(env.APP_NAME, "wrong token", google), 401);
   }
   return redirect("/admin", { "set-cookie": setCookie(request, token) });
 }
 
 async function gateAdmin(request: Request, env: Env): Promise<Response | null> {
+  const google = googleConfig(env) !== null;
   let expected = await resolveAdminToken(env);
   if (!expected) {
     const minted = await mintAdminToken(env);
-    if (minted.created) return html(revealPage(env.APP_NAME, minted.token));
+    // With Google sign-in configured, never reveal the token to whoever
+    // visits first — the session cookie is issued after Google login.
+    if (minted.created && !google) return html(revealPage(env.APP_NAME, minted.token));
     expected = minted.token;
   }
   if (!(await isAdmin(request, expected))) {
-    return html(loginPage(env.APP_NAME), 401);
+    return html(loginPage(env.APP_NAME, undefined, google), 401);
   }
   return null;
 }
