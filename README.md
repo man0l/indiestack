@@ -83,6 +83,22 @@ No D1 write on ingest. Not an access log.
 
 Caps in the app: 20 HTTP monitors, 20 heartbeats, 10 log sources. Default interval 5 minutes. HTTP alerts after 2 failures. Heartbeats alert on the first miss after grace. Logs prune after 24h.
 
+## Google sign-in (optional)
+
+Log into `/admin` with Google instead of (or alongside) the token.
+
+1. Google Cloud console → **APIs & Services → OAuth consent screen**: create it (External, add your email as test user, or publish).
+2. **Credentials → Create credentials → OAuth client ID** → *Web application*.
+   Authorized redirect URI: `https://<worker>.workers.dev/auth/google/callback` (add `http://localhost:8787/auth/google/callback` for local).
+3. **Download JSON** and store it plus your allowlist as Worker secrets:
+
+```bash
+npx wrangler secret put GOOGLE_OAUTH_JSON < client_secret_*.json
+npx wrangler secret put ADMIN_EMAILS        # e.g. you@gmail.com,cofounder@gmail.com
+```
+
+`/admin` then shows **sign in with Google**. Only verified emails in `ADMIN_EMAILS` get in. While Google is configured, the first-visit token reveal is disabled. (A *service account* key will not work here — user login needs an OAuth client ID.)
+
 ## Local
 
 ```bash

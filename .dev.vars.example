@@ -1,3 +1,9 @@
 # Optional. If you leave ADMIN_TOKEN unset, /admin generates one on first
 # visit and shows it once so you can copy it.
 # ADMIN_TOKEN=
+
+# Optional: Google sign-in for /admin. Paste the OAuth client JSON downloaded
+# from Google Cloud (Credentials → OAuth client ID → Web application) on one line,
+# or set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET instead.
+# GOOGLE_OAUTH_JSON={"web":{"client_id":"…","client_secret":"…"}}
+# ADMIN_EMAILS=you@gmail.com

@@ -301,11 +301,12 @@ export function html(body: string, status = 200, headers?: HeadersInit): Respons
   });
 }
 
-export function loginPage(title: string, error?: string): string {
+export function loginPage(title: string, error?: string, google = false): string {
   return page(
     `admin · ${title}`,
     `<header><div class="brand">${esc(title)} <span>admin</span></div></header>
      ${error ? `<p class="err">${esc(error)}</p>` : ""}
+     ${google ? `<div class="card"><a class="btn" href="/auth/google" style="display:block;text-align:center;text-decoration:none">sign in with Google</a></div>` : ""}
      <form class="card" method="post" action="/login">
        <label>token
          <input type="password" name="token" autocomplete="current-password" required autofocus/>
