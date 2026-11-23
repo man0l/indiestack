@@ -337,20 +337,21 @@ export function aggregateTsv(report: Report, tsv: string, appleId: string): Map<
     const day = f[iDate]?.slice(0, 10);
     const n = Number(f[iCount]);
     if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(n)) continue;
-    const search = iSource >= 0 && f[iSource] === "App Store search";
+    // Dimension values per Apple's glossary; compared case-insensitively.
+    const search = iSource >= 0 && f[iSource]?.toLowerCase() === "app store search";
     if (report === "engagement") {
-      const ev = iEvent >= 0 ? f[iEvent] : "";
-      if (ev === "Impression") {
+      const ev = iEvent >= 0 ? f[iEvent]?.toLowerCase() : "";
+      if (ev === "impression") {
         add(day, "impressions", n);
         if (search) add(day, "search_impressions", n);
-      } else if (ev === "Page view") {
+      } else if (ev === "page view") {
         add(day, "page_views", n);
       }
     } else {
-      const t = iType >= 0 ? f[iType] : "";
-      if (t === "First-time Download" || t === "Redownload") {
+      const t = iType >= 0 ? f[iType]?.toLowerCase() : "";
+      if (t === "first-time download" || t === "redownload") {
         add(day, "downloads", n);
-        if (t === "First-time Download") add(day, "first_downloads", n);
+        if (t === "first-time download") add(day, "first_downloads", n);
         if (search) add(day, "search_downloads", n);
       }
     }
@@ -491,16 +492,26 @@ export function isoDay(ts: number): string {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-/** Per-day totals across the given apps. For each app/day/metric, ongoing rows win over snapshot rows. */
+/**
+ * Per-day totals across the given apps. A daily instance re-delivers the last
+ * 2–3 dates (late-arriving events), and Apple says a newer processingDate
+ * replaces the whole record set for a date — never merge instances. So for
+ * each app/day/report only the latest instance counts; ongoing breaks ties.
+ */
 export async function dailyFor(db: D1Database, appIds: string[], sinceDay: string): Promise<DayRow[]> {
   if (appIds.length === 0) return [];
   const ph = appIds.map(() => "?").join(", ");
   const { results } = await db
     .prepare(
-      `SELECT app_id, day, metric,
-              COALESCE(SUM(CASE WHEN src = 'ongoing' THEN value END), SUM(value)) AS v
-       FROM appstore_daily WHERE app_id IN (${ph}) AND day >= ?
-       GROUP BY app_id, day, metric`,
+      `SELECT app_id, day, metric, value AS v FROM (
+         SELECT d.app_id, d.day, d.metric, d.value, d.instance_id,
+                FIRST_VALUE(d.instance_id) OVER (
+                  PARTITION BY d.app_id, d.day, i.report
+                  ORDER BY i.processing_date DESC, d.src = 'ongoing' DESC, d.instance_id DESC
+                ) AS latest
+         FROM appstore_daily d JOIN appstore_instances i ON i.instance_id = d.instance_id
+         WHERE d.app_id IN (${ph}) AND d.day >= ?
+       ) WHERE instance_id = latest`,
     )
     .bind(...appIds, sinceDay)
     .all<{ app_id: string; day: string; metric: Metric; v: number }>();
