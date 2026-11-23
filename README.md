@@ -109,6 +109,17 @@ The **app store** module (`/admin/p/appstore`) pulls daily **search impressions*
 
 The key is stored in your D1. To seal it with AES-GCM, set a Worker secret first: `npx wrangler secret put APPSTORE_ENC_KEY`. Keep that secret; without it, a sealed key cannot be read. Sync runs on the existing one-minute tick: it checks Apple every 6 h per app and downloads at most two report days per minute.
 
+## Slashloop social views (optional)
+
+The **slashloop** module (`/admin/p/slashloop`) signs in to [Slashloop](https://slashloop.dev) with OAuth (the same login and MCP server your agents use) and pulls **social views per lane** (accounts sharing a `lane:<name>` tag) every hour. Link a lane to an analytics site and its views show on that site's chart as a line, on its own scale.
+
+1. On `/admin/p/slashloop`, click **connect slashloop**. You sign in on Slashloop (Google) and come back here. IndieStack registers itself as an OAuth client the first time; nothing to configure on Slashloop.
+2. Lanes appear after the first sync. With one analytics site they land on it automatically; otherwise pick a default site or a site per lane.
+
+IndieStack only calls the read-only `get_social_stats` MCP tool. Tokens are stored in your D1; set `npx wrangler secret put SLASHLOOP_ENC_KEY` first to seal them with AES-GCM. `SLASHLOOP_URL` overrides the server (default `https://mcp.slashloop.dev`).
+
+The analytics chart legend doubles as layer toggles: website views, social views, app store, deploys, commits and mentions can each be hidden; the choice is remembered per browser.
+
 ## Local
 
 ```bash

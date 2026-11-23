@@ -15,19 +15,25 @@
     searchDownloads: number;
   };
 
+  type SocialDay = { day: string; views: number; byLane: Record<string, number> };
+
   let {
     days = [],
     annotations = [],
     appstore = [],
+    social = [],
   }: {
     days: Array<{ day: string; views: number; uniques: number }>;
     annotations?: Annotation[];
     appstore?: AppStoreDay[];
+    social?: SocialDay[];
   } = $props();
 
   // App Store search impressions are a different unit from pageviews, so they get
   // their own right-hand scale (bars) instead of sharing the line chart's.
   const ASC_COLOR = 'oklch(0.66 0.14 245)';
+  // Slashloop social views: their own scale too (often 100x website views).
+  const SOCIAL_COLOR = 'oklch(0.65 0.2 350)';
 
   const KIND = {
     commit: { color: 'var(--primary)', label: 'commits' },
@@ -61,7 +67,36 @@
 
   const xFor = (i: number, n: number) => CHP + (i / Math.max(1, n - 1)) * (CHW - CHP * 2);
 
-  const annOn = (day: string) => annotations.filter((a) => a.day === day);
+  // Layer toggles, shared by every site's chart and remembered per browser.
+  type Layer = 'web' | 'social' | 'appstore' | 'deploy' | 'commit' | 'mention';
+  const LAYERS_KEY = 'indiestack:chart-hidden';
+  const readHidden = (): Layer[] => {
+    try {
+      const v = JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '[]');
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  };
+  let hidden: Layer[] = $state(readHidden());
+  const on = (l: Layer) => !hidden.includes(l);
+  const toggle = (l: Layer) => {
+    hidden = on(l) ? [...hidden, l] : hidden.filter((x) => x !== l);
+    try {
+      localStorage.setItem(LAYERS_KEY, JSON.stringify(hidden));
+    } catch {
+      // private mode: toggles still work for this page view
+    }
+  };
+  $effect(() => {
+    const sync = (e: StorageEvent) => {
+      if (e.key === LAYERS_KEY) hidden = readHidden();
+    };
+    addEventListener('storage', sync);
+    return () => removeEventListener('storage', sync);
+  });
+
+  const annOn = (day: string) => annotations.filter((a) => a.day === day && on(a.kind));
 
   let hovered: string | null = $state(null);
 
@@ -79,16 +114,37 @@
   const lastAscDay = $derived(appstore.length ? appstore[appstore.length - 1].day : null);
   const barW = (CHW - CHP * 2) / Math.max(1, ax.length - 1) / 3;
   const barH = (v: number) => (v / smax) * (CHH - CHP * 2);
+
+  const soAt = (d: string) => social.find((x) => x.day === d);
+  const hasSocial = $derived(social.length > 0);
+  const socvals = $derived(ax.map((d) => soAt(d)?.views ?? 0));
+  const socmax = $derived(Math.max(...socvals, 1));
+  const showAsc = $derived(hasAsc && on('appstore'));
+  const showSocial = $derived(hasSocial && on('social'));
+
+  const chip = (l: Layer) =>
+    `flex items-center gap-1.5 rounded-full px-2 py-0.5 transition-opacity hover:bg-muted ${on(l) ? '' : 'opacity-40 line-through'}`;
 </script>
 
-<div class="mb-1 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-  <span class="flex items-center gap-1.5"><span class="inline-block h-0.5 w-4 bg-primary"></span>views</span>
-  <span class="flex items-center gap-1.5"><span class="inline-block h-0 w-4 border-t-2 border-dashed border-muted-foreground"></span>uniques</span>
-  {#if hasAsc}
-    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2 rounded-sm" style="background: {ASC_COLOR}; opacity: 0.55"></span>app store search impressions (right scale) · ↓ downloads</span>
+<div class="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground" role="group" aria-label="chart layers">
+  <button type="button" class={chip('web')} aria-pressed={on('web')} onclick={() => toggle('web')} title="website views and uniques">
+    <span class="inline-block h-0.5 w-4 bg-primary"></span>website views
+    <span class="inline-block h-0 w-3 border-t-2 border-dashed border-muted-foreground"></span>uniques
+  </button>
+  {#if hasSocial}
+    <button type="button" class={chip('social')} aria-pressed={on('social')} onclick={() => toggle('social')} title="Slashloop views gained, own scale">
+      <span class="inline-block h-0.5 w-4" style="background: {SOCIAL_COLOR}"></span>social views
+    </button>
   {/if}
-  {#each (Object.keys(KIND) as Array<keyof typeof KIND>) as k (k)}
-    <span class="flex items-center gap-1.5"><span class="inline-block size-2 rounded-full" style="background: {KIND[k].color}"></span>{KIND[k].label}</span>
+  {#if hasAsc}
+    <button type="button" class={chip('appstore')} aria-pressed={on('appstore')} onclick={() => toggle('appstore')} title="App Store search impressions (right scale) · ↓ downloads">
+      <span class="inline-block h-2.5 w-2 rounded-sm" style="background: {ASC_COLOR}; opacity: 0.55"></span>app store
+    </button>
+  {/if}
+  {#each (['deploy', 'commit', 'mention'] as const) as k (k)}
+    <button type="button" class={chip(k)} aria-pressed={on(k)} onclick={() => toggle(k)}>
+      <span class="inline-block size-2 rounded-full" style="background: {KIND[k].color}"></span>{KIND[k].label}
+    </button>
   {/each}
 </div>
 <div class="relative mb-3">
@@ -96,7 +152,7 @@
     {#each [0.25, 0.5, 0.75] as g (g)}
       <line x1={CHP} x2={CHW - CHP} y1={CHP + g * (CHH - CHP * 2)} y2={CHP + g * (CHH - CHP * 2)} stroke="var(--border)" stroke-width="1" />
     {/each}
-    {#if hasAsc}
+    {#if showAsc}
       {#each ax as day, i (day)}
         {#if svals[i] > 0}
           <rect x={xFor(i, ax.length) - barW / 2} y={CHH - CHP - barH(svals[i])} width={barW} height={barH(svals[i])} rx="2" fill={ASC_COLOR} opacity="0.35" />
@@ -107,13 +163,24 @@
       {/each}
       <text x={CHW - 2} y={CHP - 6} text-anchor="end" font-size="9" fill={ASC_COLOR}>{smax}</text>
     {/if}
-    <polyline points={line(vvals, vmax)} fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-    <polyline points={line(uvals, vmax)} fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round" />
-    {#each vvals as v, i (ax[i])}
-      <circle cx={xFor(i, vvals.length)} cy={CHH - CHP - (vmax === 0 ? 0 : (v / vmax) * (CHH - CHP * 2))} r="3" fill="var(--primary)">
-        <title>{ax[i]} · {v} views / {uvals[i]} uniques</title>
-      </circle>
-    {/each}
+    {#if showSocial}
+      <polyline points={line(socvals, socmax)} fill="none" stroke={SOCIAL_COLOR} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+      {#each socvals as v, i (ax[i])}
+        <circle cx={xFor(i, socvals.length)} cy={CHH - CHP - (v / socmax) * (CHH - CHP * 2)} r="2.5" fill={SOCIAL_COLOR}>
+          <title>{ax[i]} · {v} social views</title>
+        </circle>
+      {/each}
+      <text x={CHP} y={CHP - 6} text-anchor="start" font-size="9" fill={SOCIAL_COLOR}>{socmax} social</text>
+    {/if}
+    {#if on('web')}
+      <polyline points={line(vvals, vmax)} fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+      <polyline points={line(uvals, vmax)} fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round" />
+      {#each vvals as v, i (ax[i])}
+        <circle cx={xFor(i, vvals.length)} cy={CHH - CHP - (vmax === 0 ? 0 : (v / vmax) * (CHH - CHP * 2))} r="3" fill="var(--primary)">
+          <title>{ax[i]} · {v} views / {uvals[i]} uniques</title>
+        </circle>
+      {/each}
+    {/if}
     {#each ax as day, i (day)}
       {#each annOn(day) as a (a.label + a.sub)}
         <g>
@@ -144,9 +211,22 @@
     {@const hleft = Math.min(65, Math.max(0, (Math.max(0, hi) / Math.max(1, ax.length - 1)) * 100))}
     <div class="absolute top-0 z-10 w-64 max-w-[80%] rounded-xl border border-border bg-popover p-3 text-xs shadow-xl" style="left: {hleft}%">
       <div class="mb-1 font-semibold">
-        {ax[Math.max(0, hi)]} · {vvals[Math.max(0, hi)]} views / {uvals[Math.max(0, hi)]} uniques
+        {ax[Math.max(0, hi)]}{#if on('web')} · {vvals[Math.max(0, hi)]} views / {uvals[Math.max(0, hi)]} uniques{/if}
       </div>
-      {#if hasAsc}
+      {#if showSocial}
+        {@const so = soAt(ax[Math.max(0, hi)])}
+        <div class="mb-1" style="color: {SOCIAL_COLOR}">
+          {#if so}
+            social · {so.views} views{#if Object.keys(so.byLane).length > 1} ({Object.entries(so.byLane)
+                .sort((a, b) => b[1] - a[1])
+                .map(([l, v]) => `${l} ${v}`)
+                .join(' · ')}){:else if Object.keys(so.byLane).length === 1} · {Object.keys(so.byLane)[0]}{/if}
+          {:else}
+            social · no views gained
+          {/if}
+        </div>
+      {/if}
+      {#if showAsc}
         {@const as = asAt(ax[Math.max(0, hi)])}
         <div class="mb-1" style="color: {ASC_COLOR}">
           {#if as}

@@ -27,6 +27,7 @@ import { listAnalyticsSites } from "./analytics/index";
 import { goalStats, listGoals } from "./goals/plugin";
 import { siteStats } from "./analytics/index";
 import { dailyForSite } from "./appstore/index";
+import { socialForSite } from "./slashloop/index";
 import { parseQuery, queryLogs } from "./explorer/query";
 import { listSignals, listWatchers } from "./signals/index";
 import { crawlSummary, installGuide } from "./aicrawl/index";
@@ -446,6 +447,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
             devices: (deviceRows.results ?? []) as Array<{ device: string; views: number }>,
             annotations: annotationsBySite.get(site.id) ?? [],
             appstore: await dailyForSite(env.DB, site.id, sinceDay),
+            social: await socialForSite(env.DB, site.id, sinceDay),
             share: shareBySite.get(site.id) ?? { on: false, url: null },
             snippet: `<script defer src="${origin}/a.js" data-site="${site.token}"><\/script>`,
           });
@@ -758,7 +760,7 @@ async function buildAdminPage(
     else content = await plugin.adminSection({ env, origin, title: env.APP_NAME });
     footer = plugin?.adminFooter ?? null;
     // Islands exist per plugin; the Svelte bundle replaces this div's content on mount.
-    if (["ping", "integrations", "heartbeat", "logs", "templates", "settings", "backup", "share", "agents", "widgets", "goals", "signals", "aicrawl", "revenue", "appstore", "analytics", "explorer"].includes(activeId)) island = activeId;
+    if (["ping", "integrations", "heartbeat", "logs", "templates", "settings", "backup", "share", "agents", "widgets", "goals", "signals", "aicrawl", "revenue", "appstore", "slashloop", "analytics", "explorer"].includes(activeId)) island = activeId;
   }
   return { activeId, cards, content, island, footer };
 }

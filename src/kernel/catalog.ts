@@ -12,13 +12,14 @@ import { ping } from "../ping/plugin";
 import { revenue } from "../revenue/plugin";
 import { share } from "../share/plugin";
 import { signals } from "../signals/plugin";
+import { slashloop } from "../slashloop/plugin";
 import { templates } from "../templates/plugin";
 import { widgets } from "../widgets/plugin";
 import type { Plugin } from "./plugin";
 
 /** Register a plugin here. Kernel mounts its routes, admin slots, and tick. Do not edit ui.ts.
  *  explorer hard-depends on logs; widgets/revenue/signals/aicrawl/goals/share depend on
- *  analytics (appstore too) — keep deps earlier in this list (a plugin's `deps` field documents this).
+ *  analytics (appstore and slashloop too) — keep deps earlier in this list (a plugin's `deps` field documents this).
  *  agents exposes /agents.md, /agent/status.json and /mcp/<token> (reads other plugins'
  *  tables directly — keep it after them). */
 export const PLUGINS: Plugin[] = [
@@ -32,6 +33,7 @@ export const PLUGINS: Plugin[] = [
   widgets,
   revenue,
   appstore,
+  slashloop,
   signals,
   aicrawl,
   goals,
