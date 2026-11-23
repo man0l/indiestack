@@ -7,13 +7,27 @@
     url: string | null;
   };
 
+  type AppStoreDay = {
+    day: string;
+    impressions: number;
+    searchImpressions: number;
+    downloads: number;
+    searchDownloads: number;
+  };
+
   let {
     days = [],
     annotations = [],
+    appstore = [],
   }: {
     days: Array<{ day: string; views: number; uniques: number }>;
     annotations?: Annotation[];
+    appstore?: AppStoreDay[];
   } = $props();
+
+  // App Store search impressions are a different unit from pageviews, so they get
+  // their own right-hand scale (bars) instead of sharing the line chart's.
+  const ASC_COLOR = 'oklch(0.66 0.14 245)';
 
   const KIND = {
     commit: { color: 'var(--primary)', label: 'commits' },
@@ -56,11 +70,23 @@
   const vvals = ax.map((d) => at(d)?.views ?? 0);
   const uvals = ax.map((d) => at(d)?.uniques ?? 0);
   const vmax = Math.max(...vvals, ...uvals, 1);
+
+  const asAt = (d: string) => appstore.find((x) => x.day === d);
+  const hasAsc = $derived(appstore.length > 0);
+  const svals = $derived(ax.map((d) => asAt(d)?.searchImpressions ?? 0));
+  const dvals = $derived(ax.map((d) => asAt(d)?.downloads ?? 0));
+  const smax = $derived(Math.max(...svals, 1));
+  const lastAscDay = $derived(appstore.length ? appstore[appstore.length - 1].day : null);
+  const barW = (CHW - CHP * 2) / Math.max(1, ax.length - 1) / 3;
+  const barH = (v: number) => (v / smax) * (CHH - CHP * 2);
 </script>
 
 <div class="mb-1 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
   <span class="flex items-center gap-1.5"><span class="inline-block h-0.5 w-4 bg-primary"></span>views</span>
   <span class="flex items-center gap-1.5"><span class="inline-block h-0 w-4 border-t-2 border-dashed border-muted-foreground"></span>uniques</span>
+  {#if hasAsc}
+    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2 rounded-sm" style="background: {ASC_COLOR}; opacity: 0.55"></span>app store search impressions (right scale) · ↓ downloads</span>
+  {/if}
   {#each (Object.keys(KIND) as Array<keyof typeof KIND>) as k (k)}
     <span class="flex items-center gap-1.5"><span class="inline-block size-2 rounded-full" style="background: {KIND[k].color}"></span>{KIND[k].label}</span>
   {/each}
@@ -70,6 +96,17 @@
     {#each [0.25, 0.5, 0.75] as g (g)}
       <line x1={CHP} x2={CHW - CHP} y1={CHP + g * (CHH - CHP * 2)} y2={CHP + g * (CHH - CHP * 2)} stroke="var(--border)" stroke-width="1" />
     {/each}
+    {#if hasAsc}
+      {#each ax as day, i (day)}
+        {#if svals[i] > 0}
+          <rect x={xFor(i, ax.length) - barW / 2} y={CHH - CHP - barH(svals[i])} width={barW} height={barH(svals[i])} rx="2" fill={ASC_COLOR} opacity="0.35" />
+        {/if}
+        {#if dvals[i] > 0}
+          <text x={xFor(i, ax.length)} y={CHH - CHP - barH(svals[i]) - 4} text-anchor="middle" font-size="10" fill={ASC_COLOR}>↓{dvals[i]}</text>
+        {/if}
+      {/each}
+      <text x={CHW - 2} y={CHP - 6} text-anchor="end" font-size="9" fill={ASC_COLOR}>{smax}</text>
+    {/if}
     <polyline points={line(vvals, vmax)} fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
     <polyline points={line(uvals, vmax)} fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round" />
     {#each vvals as v, i (ax[i])}
@@ -109,6 +146,18 @@
       <div class="mb-1 font-semibold">
         {ax[Math.max(0, hi)]} · {vvals[Math.max(0, hi)]} views / {uvals[Math.max(0, hi)]} uniques
       </div>
+      {#if hasAsc}
+        {@const as = asAt(ax[Math.max(0, hi)])}
+        <div class="mb-1" style="color: {ASC_COLOR}">
+          {#if as}
+            app store · {as.searchImpressions} search / {as.impressions} total impressions · {as.downloads} downloads ({as.searchDownloads} from search)
+          {:else if lastAscDay && ax[Math.max(0, hi)] > lastAscDay}
+            app store · not reported yet (Apple lags 2–3 days)
+          {:else}
+            app store · no data
+          {/if}
+        </div>
+      {/if}
       {#if hanns.length === 0}
         <div class="text-muted-foreground">nothing else this day</div>
       {:else}

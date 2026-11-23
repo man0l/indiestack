@@ -23,6 +23,7 @@ const loaders: Record<string, () => Promise<{ default: object }>> = {
   signals: () => import('./lib/plugins/Signals.svelte'),
   aicrawl: () => import('./lib/plugins/AICrawlers.svelte'),
   revenue: () => import('./lib/plugins/Revenue.svelte'),
+  appstore: () => import('./lib/plugins/AppStore.svelte'),
   analytics: () => import('./lib/plugins/Analytics.svelte'),
   explorer: () => import('./lib/plugins/Explorer.svelte'),
 };
