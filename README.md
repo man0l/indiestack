@@ -99,6 +99,16 @@ npx wrangler secret put ADMIN_EMAILS        # e.g. you@gmail.com,cofounder@gmail
 
 `/admin` then shows **sign in with Google**. Only verified emails in `ADMIN_EMAILS` get in. While Google is configured, the first-visit token reveal is disabled. (A *service account* key will not work here — user login needs an OAuth client ID.)
 
+## App Store impressions (optional)
+
+The **app store** module (`/admin/p/appstore`) pulls daily **search impressions** and **downloads** from the App Store Connect Analytics Reports API. Link an app to an analytics site and they show on that site's chart as bars, next to deploy and commit markers.
+
+1. App Store Connect → **Users and Access → Integrations → App Store Connect API → Team Keys** → generate a key with the **Admin** role. Admin is only needed for the first report request; you can replace it with a *Sales and Reports* key later.
+2. On `/admin/p/appstore`, paste the issuer id, key id and `.p8`, pick the app and the analytics site.
+3. Apple delivers the first reports within 24–48 h, then backfills up to 90 days. Data is always ~2–3 days behind.
+
+The key is stored in your D1. To seal it with AES-GCM, set a Worker secret first: `npx wrangler secret put APPSTORE_ENC_KEY`. Keep that secret; without it, a sealed key cannot be read. Sync runs on the existing one-minute tick: it checks Apple every 6 h per app and downloads at most two report days per minute.
+
 ## Local
 
 ```bash

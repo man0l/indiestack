@@ -1,6 +1,7 @@
 import { agents } from "../agents/plugin";
 import { aicrawl } from "../aicrawl/plugin";
 import { analytics } from "../analytics/plugin";
+import { appstore } from "../appstore/plugin";
 import { backup } from "../backup/plugin";
 import { explorer } from "../explorer/plugin";
 import { goals } from "../goals/plugin";
@@ -17,7 +18,7 @@ import type { Plugin } from "./plugin";
 
 /** Register a plugin here. Kernel mounts its routes, admin slots, and tick. Do not edit ui.ts.
  *  explorer hard-depends on logs; widgets/revenue/signals/aicrawl/goals/share depend on
- *  analytics — keep deps earlier in this list (a plugin's `deps` field documents this).
+ *  analytics (appstore too) — keep deps earlier in this list (a plugin's `deps` field documents this).
  *  agents exposes /agents.md, /agent/status.json and /mcp/<token> (reads other plugins'
  *  tables directly — keep it after them). */
 export const PLUGINS: Plugin[] = [
@@ -30,6 +31,7 @@ export const PLUGINS: Plugin[] = [
   analytics,
   widgets,
   revenue,
+  appstore,
   signals,
   aicrawl,
   goals,

@@ -45,6 +45,7 @@
     keywords: Array<{ term: string; views: number }>;
     devices: Array<{ device: string; views: number }>;
     annotations: Annotation[];
+    appstore: Array<{ day: string; impressions: number; searchImpressions: number; downloads: number; searchDownloads: number }>;
     share: { on: boolean; url: string | null };
     snippet: string;
   };
@@ -228,7 +229,7 @@
               7 days: <b>{s.totals.views}</b> views · <b>{s.totals.uniques}</b> uniques
               {#if s.idMode === 'persistent'}· <b>{s.newReturn.new}</b> new · <b>{s.newReturn.returning}</b> returning{/if}
             </p>
-            <SiteChart days={s.days} annotations={s.annotations} />
+            <SiteChart days={s.days} annotations={s.annotations} appstore={s.appstore ?? []} />
             <div class="grid gap-3 sm:grid-cols-3">
               <div>
                 <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">top paths</div>
