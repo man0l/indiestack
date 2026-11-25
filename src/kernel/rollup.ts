@@ -53,7 +53,7 @@ export async function maybeRollup(env: Env, now: number): Promise<void> {
   const analytics = await env.DB.prepare(
     `SELECT s.name AS site, h.path, COUNT(*) AS views
      FROM hits h JOIN analytics_sites s ON s.id = h.site_id
-     WHERE h.day = ?
+     WHERE h.day = ? AND h.dc = 0
      GROUP BY s.id, h.path ORDER BY views DESC`,
   )
     .bind(yesterday)

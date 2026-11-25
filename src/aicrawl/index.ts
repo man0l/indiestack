@@ -81,12 +81,13 @@ export async function crawlSummary(
       `SELECT path, COUNT(*) AS n FROM ${allCrawls}
        GROUP BY path ORDER BY n DESC LIMIT 8`,
     ).bind(siteId, sinceDay),
-    // AI referrals come from the analytics base: hits whose referrer is an AI product.
+    // AI referrals come from the analytics base: hits whose referrer is an AI
+    // product, or that landed with utm_source=chatgpt.com & co (no referrer).
     env.DB.prepare(
-      `SELECT ref, COUNT(*) AS views FROM hits
-       WHERE site_id = ? AND day >= ? AND ref IS NOT NULL AND (
+      `SELECT COALESCE(ref, ref_source) AS ref, COUNT(*) AS views FROM hits
+       WHERE site_id = ? AND day >= ? AND dc = 0 AND (ref_class = 'ai' OR (ref IS NOT NULL AND (
          ${AI_REFERRERS.map((h) => `ref = '${h}' OR ref LIKE '${h}' || '%'`).join(" OR ")}
-       ) GROUP BY ref ORDER BY views DESC LIMIT 8`,
+       ))) GROUP BY 1 ORDER BY views DESC LIMIT 8`,
     ).bind(siteId, sinceDay),
   ]);
   return {

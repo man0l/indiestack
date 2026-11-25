@@ -30,7 +30,7 @@ export async function goalStats(env: Env, goal: Goal, days: number): Promise<Goa
     goal.kind === "path"
       ? env.DB.prepare(
           `SELECT COUNT(DISTINCT vid) AS n FROM hits
-           WHERE site_id = ? AND day >= ? AND (path = ? OR path LIKE ? || '/%' OR path LIKE ? || '?%')`,
+           WHERE site_id = ? AND day >= ? AND dc = 0 AND (path = ? OR path LIKE ? || '/%' OR path LIKE ? || '?%')`,
         ).bind(goal.site_id, sinceDay, goal.target, goal.target, goal.target)
       : env.DB.prepare(
           `SELECT COUNT(DISTINCT vid) AS n FROM events
@@ -40,7 +40,7 @@ export async function goalStats(env: Env, goal: Goal, days: number): Promise<Goa
     goal.kind === "path"
       ? env.DB.prepare(
           `SELECT COALESCE(NULLIF(ref, ''), 'direct') AS ref, COUNT(DISTINCT vid) AS converted
-           FROM hits WHERE site_id = ? AND day >= ? AND (path = ? OR path LIKE ? || '/%' OR path LIKE ? || '?%') AND ref IS NOT NULL
+           FROM hits WHERE site_id = ? AND day >= ? AND dc = 0 AND (path = ? OR path LIKE ? || '/%' OR path LIKE ? || '?%') AND ref IS NOT NULL
            GROUP BY ref ORDER BY converted DESC LIMIT 8`,
         ).bind(goal.site_id, sinceDay, goal.target, goal.target, goal.target)
       : env.DB.prepare(
@@ -49,7 +49,7 @@ export async function goalStats(env: Env, goal: Goal, days: number): Promise<Goa
            GROUP BY e.ref ORDER BY converted DESC LIMIT 8`,
         ).bind(goal.site_id, sinceDay, goal.target);
   const [totalsRes, convertedRes, bySource] = await env.DB.batch([
-    env.DB.prepare("SELECT COUNT(DISTINCT vid) AS n FROM hits WHERE site_id = ? AND day >= ?").bind(
+    env.DB.prepare("SELECT COUNT(DISTINCT vid) AS n FROM hits WHERE site_id = ? AND day >= ? AND dc = 0").bind(
       goal.site_id,
       sinceDay,
     ),

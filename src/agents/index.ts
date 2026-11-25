@@ -145,7 +145,7 @@ async function analyticsSummary(env: Env, now: number, days: number): Promise<un
       `SELECT s.name AS site, COUNT(*) AS views, COUNT(DISTINCT h.vid) AS uniques,
               COUNT(DISTINCT h.path) AS paths
        FROM hits h JOIN analytics_sites s ON s.id = h.site_id
-       WHERE h.day >= ? GROUP BY s.id ORDER BY views DESC`,
+       WHERE h.day >= ? AND h.dc = 0 GROUP BY s.id ORDER BY views DESC`,
     ).bind(sinceDay),
   ]);
   return {
@@ -311,7 +311,7 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       const top = await env.DB.prepare(
         `SELECT s.name AS site, h.path, COUNT(*) AS views, COUNT(DISTINCT h.vid) AS uniques
          FROM hits h JOIN analytics_sites s ON s.id = h.site_id
-         WHERE h.day >= ?
+         WHERE h.day >= ? AND h.dc = 0
          GROUP BY s.id, h.path ORDER BY views DESC LIMIT 10`,
       )
         .bind(sinceDay)
