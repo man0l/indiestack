@@ -142,35 +142,58 @@
   const showAsc = $derived(hasAsc && on('appstore'));
   const showSocial = $derived(hasSocial && on('social'));
 
+  // Legend doubles as the 7-day readout: every series carries its total, so the
+  // row says something instead of just naming colours.
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const fmt = (n: number) => (n >= 10000 ? `${(n / 1000).toFixed(0)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
+  const evCount = (k: Annotation['kind']) => annotations.filter((a) => a.kind === k && ax.includes(a.day)).length;
+  const events = (['deploy', 'commit', 'mention'] as const).filter((k) => evCount(k) > 0);
+
   const chip = (l: Layer) =>
-    `flex items-center gap-1.5 rounded-full px-2 py-0.5 transition-opacity hover:bg-muted ${on(l) ? '' : 'opacity-40 line-through'}`;
+    `group inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 transition-[opacity,background-color] hover:bg-muted/60 ${on(l) ? '' : 'opacity-35'}`;
 </script>
 
-<div class="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground" role="group" aria-label="chart layers">
+<div class="mb-2 flex flex-wrap items-center gap-x-1 gap-y-1 text-xs" role="group" aria-label="chart layers — click to show or hide">
   <button type="button" class={chip('web')} aria-pressed={on('web')} onclick={() => toggle('web')} title="website views and uniques">
-    <span class="inline-block h-0.5 w-4 bg-primary"></span>website views
-    <span class="inline-block h-0 w-3 border-t-2 border-dashed border-muted-foreground"></span>uniques
+    <span class="inline-block h-0.5 w-3.5 rounded-full bg-primary"></span>
+    <span class="text-muted-foreground">views</span>
+    <span class="font-semibold tabular-nums text-foreground">{fmt(sum(vvals))}</span>
+    <span class="ml-1.5 inline-block w-3.5 border-t-2 border-dashed border-muted-foreground"></span>
+    <span class="text-muted-foreground">uniques</span>
+    <span class="font-semibold tabular-nums text-foreground">{fmt(sum(uvals))}</span>
   </button>
   {#if hasSocial}
     <button type="button" class={chip('social')} aria-pressed={on('social')} onclick={() => toggle('social')} title="Slashloop views gained, own scale">
-      <span class="inline-block h-0.5 w-4" style="background: {SOCIAL_COLOR}"></span>social views
+      <span class="inline-block h-0.5 w-3.5 rounded-full" style="background: {SOCIAL_COLOR}"></span>
+      <span class="text-muted-foreground">social</span>
+      <span class="font-semibold tabular-nums text-foreground">{fmt(sum(socvals))}</span>
     </button>
   {/if}
   {#if hasAsc}
-    <button type="button" class={chip('appstore')} aria-pressed={on('appstore')} onclick={() => toggle('appstore')} title="App Store search impressions (right scale) · ↓ downloads">
-      <span class="inline-block h-2.5 w-2 rounded-sm" style="background: {ASC_COLOR}; opacity: 0.55"></span>app store
+    <button type="button" class={chip('appstore')} aria-pressed={on('appstore')} onclick={() => toggle('appstore')} title="App Store search impressions (own scale, max at right) · ↓ downloads">
+      <span class="inline-block h-2.5 w-2 rounded-[2px]" style="background: {ASC_COLOR}; opacity: 0.55"></span>
+      <span class="text-muted-foreground">app store</span>
+      <span class="font-semibold tabular-nums text-foreground">{fmt(sum(svals))}</span>
+      {#if sum(dvals) > 0}<span class="tabular-nums text-muted-foreground">↓{fmt(sum(dvals))}</span>{/if}
     </button>
   {/if}
   {#if hasCrawl}
     <button type="button" class={chip('crawl')} aria-pressed={on('crawl')} onclick={() => toggle('crawl')} title="AI & search crawler fetches, own scale · solid = live AI-answer fetches">
-      <span class="inline-block h-2.5 w-2 rounded-sm" style="background: {CRAWL_COLOR}"></span>ai crawls
+      <span class="inline-block h-2.5 w-2 rounded-[2px]" style="background: {CRAWL_COLOR}"></span>
+      <span class="text-muted-foreground">ai crawls</span>
+      <span class="font-semibold tabular-nums text-foreground">{fmt(sum(crvals))}</span>
     </button>
   {/if}
-  {#each (['deploy', 'commit', 'mention'] as const) as k (k)}
-    <button type="button" class={chip(k)} aria-pressed={on(k)} onclick={() => toggle(k)}>
-      <span class="inline-block size-2 rounded-full" style="background: {KIND[k].color}"></span>{KIND[k].label}
-    </button>
-  {/each}
+  {#if events.length}
+    <span class="ml-auto flex items-center gap-0.5 border-l border-border pl-2">
+      {#each events as k (k)}
+        <button type="button" class={chip(k)} aria-pressed={on(k)} onclick={() => toggle(k)} title="{evCount(k)} {KIND[k].label} this week — dashed markers on the chart">
+          <span class="inline-block size-1.5 rounded-full" style="background: {KIND[k].color}"></span>
+          <span class="tabular-nums text-muted-foreground">{evCount(k)} {evCount(k) === 1 ? KIND[k].label.slice(0, -1) : KIND[k].label}</span>
+        </button>
+      {/each}
+    </span>
+  {/if}
 </div>
 <div class="relative mb-3">
   <svg viewBox={`0 0 ${CHW} ${CHH}`} class="w-full" role="img" aria-label="visitors last 7 days with deploys and mentions">

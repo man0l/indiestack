@@ -2,6 +2,7 @@
   import MenuIcon from '@lucide/svelte/icons/menu';
   import { Button } from '$lib/components/ui/button';
   import * as Sheet from '$lib/components/ui/sheet';
+  import { NAV_ICONS } from '../../../src/nav-icons';
 
   type NavCard = { id: string; label: string; group: string; summary: string; dot: string; href: string };
   type Nav = { title: string; activeId: string; cards: NavCard[] };
@@ -38,8 +39,9 @@
     return () => window.removeEventListener('admin-nav', onNav);
   });
 
-  const dotClass = (d: string) =>
-    d === 'up' ? 'bg-success' : d === 'down' ? 'bg-destructive' : 'bg-muted-foreground';
+  const dotClass = (d: string) => (d === 'up' ? 'bg-success' : 'bg-destructive');
+  const row = (on: boolean) =>
+    `relative flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-sm no-underline hover:no-underline ${on ? 'bg-primary/10 font-semibold text-foreground before:absolute before:inset-y-2.5 before:-left-1 before:w-[3px] before:rounded-r before:bg-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`;
 </script>
 
 {#if nav.cards.length}
@@ -59,23 +61,25 @@
         <a
           href="/admin"
           aria-current={active === 'overview' ? 'page' : undefined}
-          class="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm no-underline hover:no-underline {active === 'overview' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+          class={row(active === 'overview')}
         >
+          <svg class="size-4 shrink-0 {active === 'overview' ? 'text-primary' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{@html NAV_ICONS.overview}</svg>
           overview
         </a>
         {#each groups as g (g)}
           {@const items = nav.cards.filter((c) => c.group === g)}
           {#if items.length}
-            <div class="px-3 pt-4 pb-1 text-[10px] tracking-[0.12em] text-muted-foreground uppercase">{groupLabel[g]}</div>
+            <div class="px-3 pt-4 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground/70 uppercase">{groupLabel[g]}</div>
             {#each items as c (c.id)}
               <a
                 href={c.href}
                 aria-current={active === c.id ? 'page' : undefined}
-                class="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm no-underline hover:no-underline {active === c.id ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                class={row(active === c.id)}
               >
-                <span class="size-1.5 shrink-0 rounded-full {dotClass(c.dot)}"></span>
+                <svg class="size-4 shrink-0 {active === c.id ? 'text-primary' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{@html NAV_ICONS[c.id] ?? NAV_ICONS.dot}</svg>
                 <span class="truncate">{c.label}</span>
-                {#if c.summary}<span class="ml-auto text-xs text-muted-foreground tabular-nums">{c.summary}</span>{/if}
+                {#if c.summary}<span class="ml-auto rounded-md border border-border bg-muted/50 px-1.5 text-[11px] text-muted-foreground tabular-nums">{c.summary}</span>{/if}
+                {#if c.dot === 'up' || c.dot === 'down'}<span class="size-1.5 shrink-0 rounded-full {c.summary ? '' : 'ml-auto'} {dotClass(c.dot)}"></span>{/if}
               </a>
             {/each}
           {/if}
