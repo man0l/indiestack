@@ -18,6 +18,8 @@
   import EyeIcon from '@lucide/svelte/icons/eye';
   import EyeOffIcon from '@lucide/svelte/icons/eye-off';
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+  import BadgeCheckIcon from '@lucide/svelte/icons/badge-check';
   import CopyBlock from './CopyBlock.svelte';
   import ConfirmDelete from './ConfirmDelete.svelte';
   import SiteChart from './SiteChart.svelte';
@@ -72,6 +74,24 @@
     email: 'utm_medium=email/newsletter',
     campaign: 'other UTM-tagged links',
     other: 'any other referring site',
+  };
+
+  // Same hue as the chart's crawl bars; opacity steps mirror it (solid = live AI answers).
+  const CRAWL_COLOR = 'oklch(0.7 0.14 290)';
+  const CRAWL_CAT: Record<string, { label: string; alpha: number }> = {
+    answer_fetch: { label: 'ai answers', alpha: 1 },
+    search_index: { label: 'search', alpha: 0.6 },
+    training: { label: 'training', alpha: 0.32 },
+  };
+  const crawlCats = (cs: Crawler[]) => {
+    const n = new Map<string, number>();
+    for (const c of cs) {
+      const k = c.category && CRAWL_CAT[c.category] ? c.category : 'other';
+      n.set(k, (n.get(k) ?? 0) + c.fetches);
+    }
+    return [...Object.keys(CRAWL_CAT), 'other']
+      .filter((k) => n.get(k))
+      .map((k) => ({ key: k, n: n.get(k)!, label: CRAWL_CAT[k]?.label ?? 'other', alpha: CRAWL_CAT[k]?.alpha ?? 0.15 }));
   };
 
   let sites: SiteStats[] = $state([]);
@@ -141,6 +161,22 @@
     return { ax, vmax: Math.max(...vvals, ...uvals, 1), vvals, uvals };
   };
 </script>
+
+{#snippet panel(title: string, rows: Array<{ k: string; v: number; hint?: string }>)}
+  {@const max = Math.max(1, ...rows.map((r) => r.v))}
+  <div class="min-w-0">
+    <div class="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{title}</div>
+    {#if rows.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
+      {#each rows as r (r.k)}
+        <div class="relative flex items-center gap-3 rounded px-1.5 py-[3px] text-xs" title={r.hint ?? r.k}>
+          <span class="absolute inset-y-0 left-0 rounded bg-muted/45" style="width: {(r.v / max) * 100}%"></span>
+          <span class="relative truncate text-foreground/85">{r.k}</span>
+          <span class="relative ml-auto shrink-0 tabular-nums text-muted-foreground">{r.v}</span>
+        </div>
+      {/each}
+    {/if}
+  </div>
+{/snippet}
 
 {#if msg}
   <Alert.Root class="mb-3 border-success/40 bg-success/10">
@@ -219,7 +255,7 @@
               </span>
             </div>
             <p class="mb-2 text-xs text-muted-foreground">
-              7 days: <b>{s.totals.views}</b> views · <b>{s.totals.uniques}</b> uniques
+              last 7 days
               {#if s.idMode === 'persistent'}· <b>{s.newReturn.new}</b> new · <b>{s.newReturn.returning}</b> returning{/if}
               {#if s.filtered > 0}
                 · <span title="Beacons from cloud / hosting / email-security networks (link scanners, headless renderers). Kept out of every number here.">{s.filtered} data-centre hits filtered</span>
@@ -227,73 +263,58 @@
             </p>
             <SiteChart days={s.days} annotations={s.annotations} appstore={s.appstore ?? []} social={s.social ?? []} crawls={s.crawls ?? []} />
             {#if s.crawlers?.length}
-              <div class="mb-3 flex flex-wrap gap-1.5">
-                {#each s.crawlers as c (c.crawler)}
-                  <span
-                    class="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-0.5 text-xs"
-                    title={c.verified ? "fetch IP matched the vendor\u2019s published ranges" : "identified by user-agent only"}
-                  >
-                    <span class={c.verified ? 'text-success' : 'text-muted-foreground'}>{c.crawler}</span>
-                    {#if c.category}<span class="text-muted-foreground">[{c.category}]</span>{/if}
-                    <span class="tabular-nums">{c.fetches}</span>
-                    {#if c.verified}<span class="text-success">✓</span>{/if}
+              {@const total = Math.max(1, s.crawlers.reduce((a, c) => a + c.fetches, 0))}
+              {@const cats = crawlCats(s.crawlers)}
+              <details class="group mb-4 rounded-lg border border-border/70 bg-muted/15">
+                <summary class="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 text-xs [&::-webkit-details-marker]:hidden">
+                  <span class="flex items-center gap-2">
+                    <span class="font-medium text-foreground">{s.crawlers.length} crawlers</span>
+                    <span class="tabular-nums text-muted-foreground">{total} fetches</span>
                   </span>
-                {/each}
-              </div>
+                  <span class="flex h-1.5 w-28 gap-px overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                    {#each cats as c (c.key)}
+                      <span class="h-full" style="width: {(c.n / total) * 100}%; background: {CRAWL_COLOR}; opacity: {c.alpha}"></span>
+                    {/each}
+                  </span>
+                  <span class="flex flex-wrap items-center gap-x-3 text-muted-foreground">
+                    {#each cats as c (c.key)}
+                      <span class="flex items-center gap-1"><span class="inline-block size-1.5 rounded-full" style="background: {CRAWL_COLOR}; opacity: {c.alpha}"></span>{c.label} <span class="tabular-nums text-foreground">{c.n}</span></span>
+                    {/each}
+                  </span>
+                  <span class="ml-auto flex items-center gap-1 text-muted-foreground group-open:hidden">
+                    top: {s.crawlers.slice(0, 3).map((c) => c.crawler).join(', ')}
+                    <ChevronDownIcon class="size-3.5" />
+                  </span>
+                  <span class="ml-auto hidden items-center gap-1 text-muted-foreground group-open:flex">hide <ChevronDownIcon class="size-3.5 rotate-180" /></span>
+                </summary>
+                <div class="grid gap-x-8 border-t border-border/60 px-3 py-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {#each s.crawlers as c (c.crawler)}
+                    <div class="flex items-center gap-2 py-0.5 text-xs" title={c.verified ? "fetch IP matched the vendor’s published ranges" : 'identified by user-agent only'}>
+                      <span class="truncate text-foreground">{c.crawler}</span>
+                      {#if c.verified}<BadgeCheckIcon class="size-3.5 shrink-0 text-success" aria-label="verified" />{/if}
+                      <span class="ml-auto shrink-0 text-muted-foreground">{CRAWL_CAT[c.category ?? '']?.label ?? 'other'}</span>
+                      <span class="w-8 shrink-0 text-right tabular-nums text-foreground">{c.fetches}</span>
+                    </div>
+                  {/each}
+                </div>
+              </details>
             {/if}
-            <div class="grid gap-3 sm:grid-cols-3">
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">top paths</div>
-                {#if s.topPaths.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.topPaths as p (p.path)}<div class="truncate text-xs text-muted-foreground">{p.path} · {p.views}</div>{/each}
-                {/if}
-              </div>
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">top referrers</div>
-                {#if s.topRefs.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.topRefs as r (r.ref)}<div class="truncate text-xs text-muted-foreground">{r.ref} · {r.views}</div>{/each}
-                {/if}
-              </div>
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">countries</div>
-                {#if s.topCountries.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.topCountries as c (c.country)}<div class="truncate text-xs text-muted-foreground">{c.country} · {c.views}</div>{/each}
-                {/if}
-              </div>
+            <div class="grid gap-x-8 gap-y-5 sm:grid-cols-3">
+              {@render panel('top paths', s.topPaths.map((p) => ({ k: p.path, v: p.views })))}
+              {@render panel('top referrers', s.topRefs.map((r) => ({ k: r.ref, v: r.views })))}
+              {@render panel('countries', s.topCountries.map((c) => ({ k: c.country, v: c.views })))}
+              {@render panel('sources', s.sources.map((x) => ({ k: x.source, v: x.views, hint: SOURCE_HINT[x.source] })))}
+              {@render panel('campaigns (utm)', s.campaigns.map((c) => ({ k: c.campaign, v: c.views })))}
+              {@render panel('devices', s.devices.map((d) => ({ k: d.device, v: d.views })))}
+              {#if s.aiRefs.length}{@render panel('ai referrals', s.aiRefs.map((a) => ({ k: a.source, v: a.views })))}{/if}
+              {#if s.keywords.length}{@render panel('search keywords', s.keywords.map((k) => ({ k: k.term, v: k.views })))}{/if}
             </div>
-            <div class="mt-3 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">sources</div>
-                {#if s.sources.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.sources as x (x.source)}<div class="truncate text-xs text-muted-foreground" title={SOURCE_HINT[x.source] ?? ''}>{x.source} · {x.views}</div>{/each}
-                {/if}
-              </div>
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">campaigns (utm)</div>
-                {#if s.campaigns.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.campaigns as c (c.campaign)}<div class="truncate text-xs text-muted-foreground" title={c.campaign}>{c.campaign} · {c.views}</div>{/each}
-                {/if}
-              </div>
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground" title="a person clicked through from an AI assistant">ai referrals</div>
-                {#if s.aiRefs.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.aiRefs as a (a.source)}<div class="truncate text-xs text-muted-foreground">{a.source} · {a.views}</div>{/each}
-                {/if}
-              </div>
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">search keywords</div>
-                {#if s.keywords.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.keywords as k (k.term)}<div class="truncate text-xs text-muted-foreground" title={k.term}>{k.term} · {k.views}</div>{/each}
-                {/if}
-              </div>
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">devices</div>
-                {#if s.devices.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.devices as d (d.device)}<div class="truncate text-xs text-muted-foreground">{d.device} · {d.views}</div>{/each}
-                {/if}
-              </div>
-            </div>
-            <CopyBlock label="paste into every page's <head>" text={s.snippet} copyLabel="copy snippet" />
+            <details class="group mt-4 border-t border-border/60 pt-3">
+              <summary class="flex cursor-pointer list-none items-center gap-1 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                tracking snippet <ChevronDownIcon class="size-3.5 transition-transform group-open:rotate-180" />
+              </summary>
+              <CopyBlock label="paste into every page's <head>" text={s.snippet} copyLabel="copy snippet" />
+            </details>
           </div>
         {/each}
       </div>

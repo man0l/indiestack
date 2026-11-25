@@ -1,5 +1,6 @@
 import { isMuted } from "./kernel/types";
 import { ADMIN_CSS, ADMIN_JS } from "./kernel/assets";
+import { navIcon } from "./nav-icons";
 
 export function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
@@ -183,24 +184,73 @@ export function page(title: string, body: string, extraHead = "", htmlClass = ""
     /* admin shell — sidebar ≥1024px, sticky topbar + drawer below. Breakpoints match Tailwind (640/768/1024). */
     .admin { display: flex; min-height: 100dvh; }
     .sidebar {
-      width: 248px; min-width: 248px; flex-shrink: 0;
-      background: #0c0d10; border-right: 1px solid var(--line);
-      padding: 16px 12px 24px; position: sticky; top: 0; height: 100dvh; overflow-y: auto;
+      width: 240px; min-width: 240px; flex-shrink: 0;
+      display: flex; flex-direction: column;
+      background:
+        radial-gradient(120% 40% at 0% 0%, color-mix(in srgb, var(--lime) 7%, transparent), transparent 70%),
+        linear-gradient(180deg, #0d0f13 0%, #0a0b0e 100%);
+      border-right: 1px solid #1c2029;
+      box-shadow: inset -1px 0 0 rgba(255,255,255,0.02);
+      padding: 14px 10px 12px; position: sticky; top: 0; height: 100dvh; overflow-y: auto;
     }
-    .sbrand { font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; padding: 4px 8px; }
-    .sbrand span { color: var(--mute); font-weight: 500; }
-    .sg { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mute); margin: 14px 0 6px; padding: 0 8px; }
+    .sbrand {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 8px 18px; margin-bottom: 4px; border-bottom: 1px solid #1a1e26;
+      color: var(--ink); text-decoration: none;
+    }
+    .sbrand:hover { text-decoration: none; }
+    .smark {
+      width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0; position: relative;
+      background: linear-gradient(140deg, #e4ff7a 0%, var(--lime) 45%, #7fb51a 100%);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.14) inset, 0 6px 18px -6px color-mix(in srgb, var(--lime) 70%, transparent);
+    }
+    .smark::after {
+      content: ""; position: absolute; inset: 7px 7px 7px 7px; border-radius: 3px;
+      background: #0d0f13; clip-path: polygon(0 100%, 0 55%, 30% 55%, 30% 25%, 65% 25%, 65% 0, 100% 0, 100% 100%);
+    }
+    .sname { font-weight: 650; font-size: 15px; letter-spacing: -0.02em; }
+    .stag {
+      margin-left: auto; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+      color: #8b919c; border: 1px solid #262b35; border-radius: 6px; padding: 2px 6px;
+    }
+    .snav { flex: 1; padding-top: 6px; }
+    .sg { font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #5b616d; margin: 18px 0 6px; padding: 0 10px; }
     .sitem, .ditem {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 12px; border-radius: 8px; color: #a8adb7; font-size: 14px; text-decoration: none;
-      min-height: 44px;
+      position: relative; display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 0 10px; border-radius: 8px; color: #9aa0ab; font: inherit; font-size: 13.5px; font-weight: 500;
+      text-decoration: none; background: transparent; border: 0; cursor: pointer; text-align: left;
+      min-height: 34px; margin: 1px 0;
+      transition: background-color 120ms ease, color 120ms ease;
     }
-    .sitem:hover, .ditem:hover { background: #171a21; color: var(--ink); text-decoration: none; }
-    .sitem.active, .ditem.active { background: #171a21; color: var(--ink); font-weight: 600; }
-    .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--mute); flex-shrink: 0; }
-    .sdot.up { background: var(--up); }
-    .sdot.down { background: var(--down); }
-    .scount { margin-left: auto; color: var(--mute); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .ditem { min-height: 44px; }
+    .sico { width: 16px; height: 16px; flex-shrink: 0; color: #6b717d; transition: color 120ms ease; }
+    .slabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sitem:hover, .ditem:hover { background: rgba(255,255,255,0.04); color: var(--ink); text-decoration: none; }
+    .sitem:hover .sico, .ditem:hover .sico { color: #c3c7cf; }
+    .sitem.active, .ditem.active {
+      color: var(--ink); font-weight: 600;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--lime) 12%, transparent) 0%, rgba(255,255,255,0.03) 100%);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+    }
+    .sitem.active::before, .ditem.active::before {
+      content: ""; position: absolute; left: -10px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0;
+      background: var(--lime); box-shadow: 0 0 12px color-mix(in srgb, var(--lime) 60%, transparent);
+    }
+    .ditem.active::before { left: -12px; }
+    .sitem.active .sico, .ditem.active .sico { color: var(--lime); }
+    .sdot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-left: auto; margin-right: 2px; }
+    .sdot.up { background: var(--up); box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 15%, transparent); }
+    .sdot.down { background: var(--down); box-shadow: 0 0 0 3px color-mix(in srgb, var(--down) 18%, transparent); }
+    .scount {
+      margin-left: auto; color: #8b919c; font-variant-numeric: tabular-nums; font-size: 11px; font-weight: 500;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 1px 6px;
+    }
+    .scount + .sdot { margin-left: 4px; }
+    .sitem.active .scount { color: var(--ink); background: rgba(255,255,255,0.07); }
+    .sfoot { border-top: 1px solid #1a1e26; margin-top: 14px; padding-top: 8px; }
+    .sfoot form { margin: 0; }
+    .sminor { min-height: 30px; font-size: 12.5px; color: #7d838e; }
+    .sext { margin-left: auto; color: #5b616d; font-size: 11px; }
     .amain { flex: 1; min-width: 0; padding: 0 16px 48px; }
     .acontent { max-width: 1120px; margin: 0 auto; }
     /* sticky topbar: nav + primary action always in reach */
@@ -399,27 +449,31 @@ export function adminShell(opts: {
   };
   const item = (id: string, href: string, inner: string, cls: string) =>
     `<a class="${cls}${opts.activeId === id ? " active" : ""}" href="${esc(href)}"${opts.activeId === id ? ` aria-current="page"` : ""}>${inner}</a>`;
-  const dot = (d: string) => `<span class="sdot ${esc(d)}"></span>`;
+  // Health only shows when it says something: a quiet grey dot on every row is noise.
+  const dot = (d: string) => (d === "up" || d === "down" ? `<span class="sdot ${d}" title="${d}"></span>` : "");
   const activeLabel = opts.activeId === "overview"
     ? "overview"
     : (opts.cards.find((c) => c.id === opts.activeId)?.label ?? opts.activeId);
   const count = (s: string) => (s ? `<span class="scount">${esc(s)}</span>` : "");
   const navItems = (cls: string) =>
-    item("overview", "/admin", "overview", cls) +
+    item("overview", "/admin", `${navIcon("overview")}<span class="slabel">overview</span>`, cls) +
     groups.map((g) => {
       const items = opts.cards.filter((c) => c.group === g);
       if (!items.length) return "";
       return `<div class="sg">${esc(groupLabels[g])}</div>` + items.map((c) =>
-        item(c.id, c.href, `${dot(c.dot)}${esc(c.label)}${count(c.summary)}`, cls)
+        item(c.id, c.href, `${navIcon(c.id)}<span class="slabel">${esc(c.label)}</span>${count(c.summary)}${dot(c.dot)}`, cls)
       ).join("");
-    }).join("") +
-    `<div class="sg">elsewhere</div>` +
-    `<a class="${cls}" href="/">status ↗</a>` +
-    `<a class="${cls}" href="/agents.md">/agents.md</a>`;
+    }).join("");
+  const footer = (cls: string) => `<div class="sfoot">
+      <a class="${cls} sminor" href="/" target="_blank" rel="noopener">${navIcon("status")}<span class="slabel">status page</span><span class="sext">↗</span></a>
+      <a class="${cls} sminor" href="/agents.md">${navIcon("agentsmd")}<span class="slabel">agents.md</span></a>
+      <form method="post" action="/logout"><button class="${cls} sminor slogout" type="submit">${navIcon("logout")}<span class="slabel">log out</span></button></form>
+    </div>`;
+  const brand = `<a class="sbrand" href="/admin"><span class="smark" aria-hidden="true"></span><span class="sname">${esc(opts.title)}</span><span class="stag">admin</span></a>`;
   const sidebar = `<aside class="sidebar" aria-label="admin">
-    <div class="sbrand">${esc(opts.title)} <span>admin</span></div>
-    <nav>${navItems("sitem")}</nav>
-    <form method="post" action="/logout" style="margin-top:10px"><button class="sghost" type="submit">logout</button></form>
+    ${brand}
+    <nav class="snav">${navItems("sitem")}</nav>
+    ${footer("sitem")}
   </aside>`;
   const drawer = `<noscript><details class="drawer" id="navdrawer">
     <summary class="dbtn" aria-label="open menu"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h14M3 10h14M3 15h14"/></svg></summary>
@@ -427,7 +481,7 @@ export function adminShell(opts: {
     <nav class="dpanel" aria-label="admin">
       <div class="dhead">${esc(opts.title)} <span>admin</span></div>
       ${navItems("ditem")}
-      <form method="post" action="/logout" style="margin-top:10px"><button class="sghost" type="submit">logout</button></form>
+      ${footer("ditem")}
     </nav>
   </details></noscript>`;
   const navJson = JSON.stringify({ title: opts.title, activeId: opts.activeId, cards: opts.cards }).replace(
