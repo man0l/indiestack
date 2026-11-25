@@ -56,7 +56,7 @@ export function collectorScript(): string {
     if(navigator.sendBeacon) navigator.sendBeacon(o+path,b);
     else fetch(o+path,{method:"POST",body:b,keepalive:true});
   }
-  function pv(){post("/hit",{p:location.pathname.slice(0,200),q:location.search.slice(0,300),r:(document.referrer||"").slice(0,500),w:window.innerWidth||0});}
+  function pv(){post("/hit",{h:location.hostname.slice(0,100),p:location.pathname.slice(0,200),q:location.search.slice(0,300),r:(document.referrer||"").slice(0,500),w:window.innerWidth||0});}
   function nav(){
     if(location.pathname!==last){last=location.pathname;pv();}
   }
@@ -73,7 +73,16 @@ export function collectorScript(): string {
 })();`;
 }
 
-export type HitPayload = { s: string; p: string; r?: string | null; q?: string | null; w?: number; v?: string | null };
+export type HitPayload = {
+  s: string;
+  p: string;
+  /** Page hostname — tells internal navigation apart from real referrals. */
+  h?: string | null;
+  r?: string | null;
+  q?: string | null;
+  w?: number;
+  v?: string | null;
+};
 
 /** Persistent-mode client ID: random UUID-ish, not free text. */
 export const CLIENT_VID_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -90,7 +99,8 @@ export function parseHit(raw: string): HitPayload | null {
     const r = typeof v.r === "string" && v.r ? v.r.slice(0, 500) : null;
     const q = typeof v.q === "string" && v.q ? v.q.slice(0, 300) : null;
     const cv = typeof v.v === "string" && CLIENT_VID_RE.test(v.v) ? v.v : null;
-    return { s, p, r, q, v: cv };
+    const h = typeof v.h === "string" && v.h ? v.h.slice(0, 100).toLowerCase() : null;
+    return { s, p, h, r, q, v: cv };
   } catch {
     return null;
   }
@@ -98,7 +108,9 @@ export function parseHit(raw: string): HitPayload | null {
 
 // ------------------------------------------------------- hit enrichment
 
-export type RefClass = "search" | "ai" | "social" | "direct" | "other";
+/** internal = navigation between the site's own pages (same-host referrer);
+ *  email / campaign = no referrer, but the landing URL carried UTM tags. */
+export type RefClass = "search" | "ai" | "social" | "email" | "campaign" | "other" | "direct" | "internal";
 
 export type RefInfo = {
   refClass: RefClass;
@@ -159,8 +171,11 @@ function hostMatches(host: string, key: string): boolean {
   return host === key || host.endsWith(`.${key}`);
 }
 
-/** Classify a raw referrer URL: class, source, search term, referring path. */
-export function classifyReferrer(raw: string | null): RefInfo {
+const bareHost = (h: string) => h.toLowerCase().replace(/^www\./, "");
+
+/** Classify a raw referrer URL: class, source, search term, referring path.
+ *  `ownHost` is the page's hostname; a referrer on the same host is internal. */
+export function classifyReferrer(raw: string | null, ownHost: string | null = null): RefInfo {
   const none: RefInfo = { refClass: "direct", refSource: null, searchTerm: null, refPath: null, refHost: null };
   if (!raw) return none;
   let u: URL;
@@ -172,6 +187,9 @@ export function classifyReferrer(raw: string | null): RefInfo {
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
   if (!host) return none;
   const path = (u.pathname + (u.search || "")).slice(0, 300);
+  if (ownHost && host === bareHost(ownHost)) {
+    return { refClass: "internal", refSource: null, searchTerm: null, refPath: path, refHost: host };
+  }
   // AI hosts first — gemini.google.com must not fall into the google bucket.
   for (const [key, source] of Object.entries(AI_HOSTS)) {
     if (hostMatches(host, key)) {
@@ -204,6 +222,53 @@ export function classifyReferrer(raw: string | null): RefInfo {
     }
   }
   return { refClass: "other", refSource: host, searchTerm: null, refPath: path, refHost: host };
+}
+
+const UTM_SOCIAL = new Set([
+  "youtube", "yt", "x", "twitter", "reddit", "linkedin", "facebook", "instagram",
+  "tiktok", "threads", "bluesky", "hn", "producthunt", "pinterest",
+]);
+
+/** No referrer, but UTM-tagged: the tag names the source. ChatGPT search, for
+ *  one, strips the referrer and appends utm_source=chatgpt.com. */
+export function classifyUtm(source: string | null, medium: string | null): RefInfo | null {
+  if (!source) return null;
+  const src = source.toLowerCase();
+  const base = { searchTerm: null, refPath: null, refHost: null };
+  for (const [key, ai] of Object.entries(AI_HOSTS)) {
+    if (src === key || src === ai || src.endsWith(`.${key}`)) return { ...base, refClass: "ai", refSource: ai };
+  }
+  if (/^(e-?mail|newsletter)$/.test((medium ?? "").toLowerCase())) return { ...base, refClass: "email", refSource: src };
+  if (UTM_SOCIAL.has(src)) return { ...base, refClass: "social", refSource: src };
+  return { ...base, refClass: "campaign", refSource: src };
+}
+
+/**
+ * Networks where a "visit" is a machine: cloud/hosting providers and email
+ * security gateways that open every link in a mail (Safe Links, URL defense)
+ * with a real headless browser that runs the snippet. Hits from these are kept
+ * but flagged dc = 1 and left out of views. Only confirmed ASNs — never guess.
+ */
+const DC_ASNS = new Set([
+  16509, 14618, // Amazon / AWS
+  15169, 396982, 19527, // Google, Google Cloud
+  8075, 8068, // Microsoft / Azure (Defender Safe Links)
+  31898, // Oracle Cloud
+  14061, // DigitalOcean
+  24940, 213230, // Hetzner
+  16276, // OVH
+  63949, // Linode / Akamai Connected Cloud
+  20473, // Vultr / Choopa
+  45102, // Alibaba Cloud
+  132203, // Tencent Cloud
+  12876, // Scaleway
+  51167, // Contabo
+  26211, 22843, // Proofpoint
+  30031, // Mimecast
+]);
+
+export function isDataCenterAsn(asn: number | null | undefined): boolean {
+  return asn != null && DC_ASNS.has(asn);
 }
 
 /** Coarse device/browser/os buckets — enough for breakdowns, no dependency. */
@@ -304,14 +369,15 @@ export async function recordHit(
   ua: string,
   city: string | null,
   region: string | null,
+  asn: number | null = null,
 ): Promise<RecordHitResult> {
   // Beacons come from real browsers; crawlers never beacon, but faked ones must not pollute stats.
   if (isBotUA(ua)) return { ok: true, counted: false };
   const site = await env.DB.prepare(
-    "SELECT id, token, id_mode FROM analytics_sites WHERE token = ? AND enabled = 1",
+    "SELECT id, name, token, id_mode FROM analytics_sites WHERE token = ? AND enabled = 1",
   )
     .bind(payload.s)
-    .first<{ id: string; token: string; id_mode: AnalyticsSiteIdMode }>();
+    .first<{ id: string; name: string; token: string; id_mode: AnalyticsSiteIdMode }>();
   if (!site) return { ok: false, counted: false };
   const now = Date.now();
   const day = new Date(now).toISOString().slice(0, 10);
@@ -338,14 +404,17 @@ export async function recordHit(
       .first();
     newVisitor = prior ? 0 : 1;
   }
-  const ref = classifyReferrer(payload.r ?? null);
   const utm = parseUtm(payload.q ?? null);
+  // Old cached snippets send no hostname; a site named after its domain still works.
+  const ownHost = payload.h ?? (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(site.name) ? site.name : null);
+  let ref = classifyReferrer(payload.r ?? null, ownHost);
+  if (ref.refClass === "direct") ref = classifyUtm(utm.source, utm.medium) ?? ref;
   const { device, browser, os } = parseUA(ua);
   await env.DB.prepare(
     `INSERT INTO hits (site_id, day, ts, path, ref, country, vid,
        ref_class, ref_source, search_term, ref_path, device, browser, os,
-       city, region, utm_source, utm_medium, utm_campaign, new_visitor)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       city, region, utm_source, utm_medium, utm_campaign, new_visitor, asn, dc)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       site.id,
@@ -368,6 +437,8 @@ export async function recordHit(
       utm.medium,
       utm.campaign,
       newVisitor,
+      asn,
+      isDataCenterAsn(asn) ? 1 : 0,
     )
     .run();
   return { ok: true, counted: true };
@@ -380,7 +451,17 @@ export type SiteStats = {
   topPaths: Array<{ path: string; views: number; uniques: number }>;
   topRefs: Array<{ ref: string; views: number }>;
   topCountries: Array<{ country: string; views: number }>;
+  /** Where visits came from, by class — internal navigation left out. */
+  sources: Array<{ source: string; views: number }>;
+  campaigns: Array<{ campaign: string; views: number }>;
+  /** Data-centre / email-scanner hits kept out of every number above. */
+  filtered: number;
 };
+
+/** First day of an N-day window ending today (UTC), inclusive — matches the chart axis. */
+export function windowStart(days: number): string {
+  return new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+}
 
 /** Stats for a site id — used by the share plugin for public dashboards. */
 export async function siteStatsById(env: Env, siteId: string, days = 7): Promise<SiteStats | null> {
@@ -392,30 +473,46 @@ export async function siteStatsById(env: Env, siteId: string, days = 7): Promise
 }
 
 export async function siteStats(env: Env, site: AnalyticsSite, days = 7): Promise<SiteStats> {
-  const sinceDay = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const [byDay, totalsRes, paths, refs, countries] = await env.DB.batch([
+  const sinceDay = windowStart(days);
+  const human = "site_id = ? AND day >= ? AND dc = 0";
+  const [byDay, totalsRes, paths, refs, countries, sources, campaigns, filtered] = await env.DB.batch([
     env.DB.prepare(
       `SELECT day, COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
-       FROM hits WHERE site_id = ? AND day >= ? GROUP BY day ORDER BY day ASC`,
+       FROM hits WHERE ${human} GROUP BY day ORDER BY day ASC`,
     ).bind(site.id, sinceDay),
     env.DB.prepare(
       `SELECT COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
-       FROM hits WHERE site_id = ? AND day >= ?`,
+       FROM hits WHERE ${human}`,
     ).bind(site.id, sinceDay),
     env.DB.prepare(
       `SELECT path, COUNT(*) AS views, COUNT(DISTINCT vid) AS uniques
-       FROM hits WHERE site_id = ? AND day >= ? GROUP BY path ORDER BY views DESC LIMIT 8`,
+       FROM hits WHERE ${human} GROUP BY path ORDER BY views DESC LIMIT 8`,
     ).bind(site.id, sinceDay),
     env.DB.prepare(
       `SELECT ref, COUNT(*) AS views FROM hits
-       WHERE site_id = ? AND day >= ? AND ref IS NOT NULL AND ref != ''
+       WHERE ${human} AND ref IS NOT NULL AND ref != '' AND ref_class != 'internal'
        GROUP BY ref ORDER BY views DESC LIMIT 8`,
     ).bind(site.id, sinceDay),
     env.DB.prepare(
       `SELECT country, COUNT(*) AS views FROM hits
-       WHERE site_id = ? AND day >= ? AND country IS NOT NULL
+       WHERE ${human} AND country IS NOT NULL
        GROUP BY country ORDER BY views DESC LIMIT 8`,
     ).bind(site.id, sinceDay),
+    env.DB.prepare(
+      `SELECT COALESCE(ref_class, 'direct') AS source, COUNT(*) AS views FROM hits
+       WHERE ${human} AND COALESCE(ref_class, 'direct') != 'internal'
+       GROUP BY source ORDER BY views DESC`,
+    ).bind(site.id, sinceDay),
+    env.DB.prepare(
+      `SELECT utm_source || COALESCE(' / ' || utm_medium, '') || COALESCE(' / ' || utm_campaign, '') AS campaign,
+              COUNT(*) AS views FROM hits
+       WHERE ${human} AND utm_source IS NOT NULL
+       GROUP BY campaign ORDER BY views DESC LIMIT 8`,
+    ).bind(site.id, sinceDay),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM hits WHERE site_id = ? AND day >= ? AND dc = 1`).bind(
+      site.id,
+      sinceDay,
+    ),
   ]);
   const totalsRow = (totalsRes.results ?? [])[0] as { views: number; uniques: number } | undefined;
   return {
@@ -428,6 +525,9 @@ export async function siteStats(env: Env, site: AnalyticsSite, days = 7): Promis
     topPaths: (paths.results ?? []) as Array<{ path: string; views: number; uniques: number }>,
     topRefs: (refs.results ?? []) as Array<{ ref: string; views: number }>,
     topCountries: (countries.results ?? []) as Array<{ country: string; views: number }>,
+    sources: (sources.results ?? []) as Array<{ source: string; views: number }>,
+    campaigns: (campaigns.results ?? []) as Array<{ campaign: string; views: number }>,
+    filtered: Number(((filtered.results ?? [])[0] as { n: number } | undefined)?.n) || 0,
   };
 }
 

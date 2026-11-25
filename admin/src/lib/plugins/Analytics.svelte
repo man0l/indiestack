@@ -41,6 +41,11 @@
     topPaths: Array<{ path: string; views: number }>;
     topRefs: Array<{ ref: string; views: number }>;
     topCountries: Array<{ country: string; views: number }>;
+    sources: Array<{ source: string; views: number }>;
+    campaigns: Array<{ campaign: string; views: number }>;
+    filtered: number;
+    crawls: Array<{ day: string; total: number; byCategory: Record<string, number> }>;
+    crawlers: Crawler[];
     aiRefs: Array<{ source: string; views: number }>;
     keywords: Array<{ term: string; views: number }>;
     devices: Array<{ device: string; views: number }>;
@@ -53,14 +58,21 @@
 
   type Crawler = {
     crawler: string;
-    vendor: string | null;
     category: string | null;
     verified: boolean;
     fetches: number;
-    lastTs: number;
   };
 
-  let crawlers: Crawler[] = $state([]);
+  // What each source bucket means, shown on hover.
+  const SOURCE_HINT: Record<string, string> = {
+    direct: 'no referrer and no UTM tag: typed URL, bookmark, app, or a link that strips the referrer',
+    search: 'Google, Bing, DuckDuckGo & co',
+    ai: 'a person clicked a link in ChatGPT, Perplexity, Gemini, Claude…',
+    social: 'social referrer or utm_source=youtube/x/…',
+    email: 'utm_medium=email/newsletter',
+    campaign: 'other UTM-tagged links',
+    other: 'any other referring site',
+  };
 
   let sites: SiteStats[] = $state([]);
   let loading = $state(true);
@@ -85,7 +97,6 @@
       if (r.ok) {
         const j = await r.json();
         sites = j.sites ?? [];
-        crawlers = j.crawlers ?? [];
       } else err = 'failed to load analytics';
     } catch (e) {
       err = String(e);
@@ -163,25 +174,6 @@
     <Card.Description>Cookie-free pageviews. One D1 write per view, capped 2,000 views/site/day. 30-day retention.</Card.Description>
   </Card.Header>
   <Card.Content>
-    {#if crawlers.length}
-      <div class="mb-4 rounded-xl border border-border bg-card p-3">
-        <div class="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">ai &amp; search crawlers · 7 days</div>
-        <div class="flex flex-wrap gap-2">
-          {#each crawlers as c (c.crawler)}
-            <span
-              class="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs"
-              title={c.verified ? "fetch IP matched the vendor\u2019s published ranges" : "identified by user-agent only"}
-            >
-              <span class={c.verified ? 'text-success' : 'text-muted-foreground'}>{c.crawler}</span>
-              {#if c.category}<span class="text-muted-foreground">[{c.category}]</span>{/if}
-              <span class="text-muted-foreground">·</span>
-              <span class="tabular-nums">{c.fetches}</span>
-              {#if c.verified}<span class="text-success">✓</span>{/if}
-            </span>
-          {/each}
-        </div>
-      </div>
-    {/if}
     {#if loading}
       <div class="flex flex-col gap-2">
         <Skeleton class="h-32 rounded-lg" />
@@ -229,8 +221,26 @@
             <p class="mb-2 text-xs text-muted-foreground">
               7 days: <b>{s.totals.views}</b> views · <b>{s.totals.uniques}</b> uniques
               {#if s.idMode === 'persistent'}· <b>{s.newReturn.new}</b> new · <b>{s.newReturn.returning}</b> returning{/if}
+              {#if s.filtered > 0}
+                · <span title="Beacons from cloud / hosting / email-security networks (link scanners, headless renderers). Kept out of every number here.">{s.filtered} data-centre hits filtered</span>
+              {/if}
             </p>
-            <SiteChart days={s.days} annotations={s.annotations} appstore={s.appstore ?? []} social={s.social ?? []} />
+            <SiteChart days={s.days} annotations={s.annotations} appstore={s.appstore ?? []} social={s.social ?? []} crawls={s.crawls ?? []} />
+            {#if s.crawlers?.length}
+              <div class="mb-3 flex flex-wrap gap-1.5">
+                {#each s.crawlers as c (c.crawler)}
+                  <span
+                    class="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-0.5 text-xs"
+                    title={c.verified ? "fetch IP matched the vendor\u2019s published ranges" : "identified by user-agent only"}
+                  >
+                    <span class={c.verified ? 'text-success' : 'text-muted-foreground'}>{c.crawler}</span>
+                    {#if c.category}<span class="text-muted-foreground">[{c.category}]</span>{/if}
+                    <span class="tabular-nums">{c.fetches}</span>
+                    {#if c.verified}<span class="text-success">✓</span>{/if}
+                  </span>
+                {/each}
+              </div>
+            {/if}
             <div class="grid gap-3 sm:grid-cols-3">
               <div>
                 <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">top paths</div>
@@ -251,10 +261,21 @@
                 {/if}
               </div>
             </div>
-            <CopyBlock label="paste into every page's <head>" text={s.snippet} copyLabel="copy snippet" />
-            <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="mt-3 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">ai referrals</div>
+                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">sources</div>
+                {#if s.sources.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
+                  {#each s.sources as x (x.source)}<div class="truncate text-xs text-muted-foreground" title={SOURCE_HINT[x.source] ?? ''}>{x.source} · {x.views}</div>{/each}
+                {/if}
+              </div>
+              <div>
+                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">campaigns (utm)</div>
+                {#if s.campaigns.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
+                  {#each s.campaigns as c (c.campaign)}<div class="truncate text-xs text-muted-foreground" title={c.campaign}>{c.campaign} · {c.views}</div>{/each}
+                {/if}
+              </div>
+              <div>
+                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground" title="a person clicked through from an AI assistant">ai referrals</div>
                 {#if s.aiRefs.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
                   {#each s.aiRefs as a (a.source)}<div class="truncate text-xs text-muted-foreground">{a.source} · {a.views}</div>{/each}
                 {/if}
@@ -269,12 +290,6 @@
                 <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">devices</div>
                 {#if s.devices.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
                   {#each s.devices as d (d.device)}<div class="truncate text-xs text-muted-foreground">{d.device} · {d.views}</div>{/each}
-                {/if}
-              </div>
-              <div>
-                <div class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">top referrers</div>
-                {#if s.topRefs.length === 0}<span class="text-xs text-muted-foreground">—</span>{:else}
-                  {#each s.topRefs as r (r.ref)}<div class="truncate text-xs text-muted-foreground">{r.ref} · {r.views}</div>{/each}
                 {/if}
               </div>
             </div>

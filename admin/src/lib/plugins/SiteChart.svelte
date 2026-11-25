@@ -17,16 +17,20 @@
 
   type SocialDay = { day: string; views: number; byLane: Record<string, number> };
 
+  type CrawlDay = { day: string; total: number; byCategory: Record<string, number> };
+
   let {
     days = [],
     annotations = [],
     appstore = [],
     social = [],
+    crawls = [],
   }: {
     days: Array<{ day: string; views: number; uniques: number }>;
     annotations?: Annotation[];
     appstore?: AppStoreDay[];
     social?: SocialDay[];
+    crawls?: CrawlDay[];
   } = $props();
 
   // App Store search impressions are a different unit from pageviews, so they get
@@ -34,6 +38,15 @@
   const ASC_COLOR = 'oklch(0.66 0.14 245)';
   // Slashloop social views: their own scale too (often 100x website views).
   const SOCIAL_COLOR = 'oklch(0.65 0.2 350)';
+  // AI/search crawler fetches: own scale. Solid = live AI-answer fetches (someone
+  // asked ChatGPT & co and it opened this page); faint = indexing/training crawls.
+  const CRAWL_COLOR = 'oklch(0.7 0.14 290)';
+  const CATEGORY: Record<string, string> = {
+    answer_fetch: 'ai answers',
+    search_index: 'search index',
+    training: 'training',
+    ai_crawler: 'unlabelled',
+  };
 
   const KIND = {
     commit: { color: 'var(--primary)', label: 'commits' },
@@ -68,7 +81,7 @@
   const xFor = (i: number, n: number) => CHP + (i / Math.max(1, n - 1)) * (CHW - CHP * 2);
 
   // Layer toggles, shared by every site's chart and remembered per browser.
-  type Layer = 'web' | 'social' | 'appstore' | 'deploy' | 'commit' | 'mention';
+  type Layer = 'web' | 'social' | 'appstore' | 'crawl' | 'deploy' | 'commit' | 'mention';
   const LAYERS_KEY = 'indiestack:chart-hidden';
   const readHidden = (): Layer[] => {
     try {
@@ -119,6 +132,13 @@
   const hasSocial = $derived(social.length > 0);
   const socvals = $derived(ax.map((d) => soAt(d)?.views ?? 0));
   const socmax = $derived(Math.max(...socvals, 1));
+  const crAt = (d: string) => crawls.find((x) => x.day === d);
+  const hasCrawl = $derived(crawls.length > 0);
+  const crvals = $derived(ax.map((d) => crAt(d)?.total ?? 0));
+  const ansvals = $derived(ax.map((d) => crAt(d)?.byCategory.answer_fetch ?? 0));
+  const crmax = $derived(Math.max(...crvals, 1));
+  const crH = (v: number) => (v / crmax) * (CHH - CHP * 2) * 0.6;
+  const showCrawl = $derived(hasCrawl && on('crawl'));
   const showAsc = $derived(hasAsc && on('appstore'));
   const showSocial = $derived(hasSocial && on('social'));
 
@@ -139,6 +159,11 @@
   {#if hasAsc}
     <button type="button" class={chip('appstore')} aria-pressed={on('appstore')} onclick={() => toggle('appstore')} title="App Store search impressions (right scale) · ↓ downloads">
       <span class="inline-block h-2.5 w-2 rounded-sm" style="background: {ASC_COLOR}; opacity: 0.55"></span>app store
+    </button>
+  {/if}
+  {#if hasCrawl}
+    <button type="button" class={chip('crawl')} aria-pressed={on('crawl')} onclick={() => toggle('crawl')} title="AI & search crawler fetches, own scale · solid = live AI-answer fetches">
+      <span class="inline-block h-2.5 w-2 rounded-sm" style="background: {CRAWL_COLOR}"></span>ai crawls
     </button>
   {/if}
   {#each (['deploy', 'commit', 'mention'] as const) as k (k)}
@@ -162,6 +187,16 @@
         {/if}
       {/each}
       <text x={CHW - 2} y={CHP - 6} text-anchor="end" font-size="9" fill={ASC_COLOR}>{smax}</text>
+    {/if}
+    {#if showCrawl}
+      {#each ax as day, i (day)}
+        {#if crvals[i] > 0}
+          <rect x={xFor(i, ax.length) + barW / 2 + 2} y={CHH - CHP - crH(crvals[i])} width={barW * 0.6} height={crH(crvals[i])} rx="2" fill={CRAWL_COLOR} opacity="0.3" />
+        {/if}
+        {#if ansvals[i] > 0}
+          <rect x={xFor(i, ax.length) + barW / 2 + 2} y={CHH - CHP - crH(ansvals[i])} width={barW * 0.6} height={crH(ansvals[i])} rx="2" fill={CRAWL_COLOR} />
+        {/if}
+      {/each}
     {/if}
     {#if showSocial}
       <polyline points={line(socvals, socmax)} fill="none" stroke={SOCIAL_COLOR} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
@@ -235,6 +270,19 @@
             app store · not reported yet (Apple lags 2–3 days)
           {:else}
             app store · no data
+          {/if}
+        </div>
+      {/if}
+      {#if showCrawl}
+        {@const cr = crAt(ax[Math.max(0, hi)])}
+        <div class="mb-1" style="color: {CRAWL_COLOR}">
+          {#if cr}
+            ai crawls · {cr.total} ({Object.entries(cr.byCategory)
+              .sort((a, b) => b[1] - a[1])
+              .map(([c, v]) => `${CATEGORY[c] ?? c} ${v}`)
+              .join(' · ')})
+          {:else}
+            ai crawls · none
           {/if}
         </div>
       {/if}

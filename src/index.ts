@@ -25,7 +25,7 @@ import { listLogSources } from "./logs/index";
 import { TEMPLATES } from "./templates/index";
 import { listAnalyticsSites } from "./analytics/index";
 import { goalStats, listGoals } from "./goals/plugin";
-import { siteStats } from "./analytics/index";
+import { siteStats, windowStart } from "./analytics/index";
 import { dailyForSite } from "./appstore/index";
 import { socialForSite } from "./slashloop/index";
 import { parseQuery, queryLogs } from "./explorer/query";
@@ -386,46 +386,46 @@ async function handle(request: Request, env: Env): Promise<Response> {
         url: m.url,
       });
     }
-    const sinceDay = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    const sinceTs = Date.now() - 7 * 86400000;
-    const crawlerRows = await env.DB.prepare(
-      `SELECT crawler, vendor, category, MAX(verified) AS verified, COUNT(*) AS fetches, MAX(ts) AS last_ts
-       FROM crawler_fetches WHERE ts >= ? GROUP BY crawler ORDER BY fetches DESC LIMIT 10`,
-    )
-      .bind(sinceTs)
-      .all<{ crawler: string; vendor: string | null; category: string | null; verified: number; fetches: number; last_ts: number }>();
+    const sinceDay = windowStart(7);
     return Response.json({
-      crawlers: (crawlerRows.results ?? []).map((r) => ({
-        crawler: r.crawler,
-        vendor: r.vendor,
-        category: r.category,
-        verified: Boolean(r.verified),
-        fetches: Number(r.fetches),
-        lastTs: r.last_ts,
-      })),
       sites: await (async () => {
         const out = [];
         for (const site of sites) {
           const s = await siteStats(env, site, 7);
-          const [aiRows, keywordRows, deviceRows, newReturn] = await env.DB.batch([
+          const [aiRows, keywordRows, deviceRows, newReturn, crawlDays, crawlerRows] = await env.DB.batch([
             env.DB.prepare(
               `SELECT ref_source AS source, COUNT(*) AS views FROM hits
-               WHERE site_id = ? AND day >= ? AND ref_class = 'ai' GROUP BY ref_source ORDER BY views DESC LIMIT 8`,
+               WHERE site_id = ? AND day >= ? AND dc = 0 AND ref_class = 'ai' GROUP BY ref_source ORDER BY views DESC LIMIT 8`,
             ).bind(site.id, sinceDay),
             env.DB.prepare(
               `SELECT search_term AS term, COUNT(*) AS views FROM hits
-               WHERE site_id = ? AND day >= ? AND ref_class = 'search' AND search_term IS NOT NULL
+               WHERE site_id = ? AND day >= ? AND dc = 0 AND ref_class = 'search' AND search_term IS NOT NULL
                GROUP BY search_term ORDER BY views DESC LIMIT 8`,
             ).bind(site.id, sinceDay),
             env.DB.prepare(
               `SELECT device, COUNT(*) AS views FROM hits
-               WHERE site_id = ? AND day >= ? GROUP BY device ORDER BY views DESC LIMIT 4`,
+               WHERE site_id = ? AND day >= ? AND dc = 0 GROUP BY device ORDER BY views DESC LIMIT 4`,
             ).bind(site.id, sinceDay),
             env.DB.prepare(
               `SELECT new_visitor, COUNT(DISTINCT vid) AS n FROM hits
-               WHERE site_id = ? AND day >= ? GROUP BY new_visitor`,
+               WHERE site_id = ? AND day >= ? AND dc = 0 GROUP BY new_visitor`,
+            ).bind(site.id, sinceDay),
+            env.DB.prepare(
+              `SELECT day, COALESCE(category, 'ai_crawler') AS category, COUNT(*) AS n FROM crawler_fetches
+               WHERE site_id = ? AND day >= ? GROUP BY day, category ORDER BY day ASC`,
+            ).bind(site.id, sinceDay),
+            env.DB.prepare(
+              `SELECT crawler, category, MAX(verified) AS verified, COUNT(*) AS fetches FROM crawler_fetches
+               WHERE site_id = ? AND day >= ? GROUP BY crawler ORDER BY fetches DESC LIMIT 12`,
             ).bind(site.id, sinceDay),
           ]);
+          const crawls = new Map<string, { day: string; total: number; byCategory: Record<string, number> }>();
+          for (const r of (crawlDays.results ?? []) as Array<{ day: string; category: string; n: number }>) {
+            const d = crawls.get(r.day) ?? { day: r.day, total: 0, byCategory: {} };
+            d.total += Number(r.n);
+            d.byCategory[r.category] = Number(r.n);
+            crawls.set(r.day, d);
+          }
           const nr = { new: 0, returning: 0 };
           for (const r of (newReturn.results ?? []) as Array<{ new_visitor: number; n: number }>) {
             if (Number(r.new_visitor) === 1) nr.new = Number(r.n);
@@ -442,6 +442,13 @@ async function handle(request: Request, env: Env): Promise<Response> {
             topPaths: s.topPaths,
             topRefs: s.topRefs,
             topCountries: s.topCountries,
+            sources: s.sources,
+            campaigns: s.campaigns,
+            filtered: s.filtered,
+            crawls: [...crawls.values()],
+            crawlers: ((crawlerRows.results ?? []) as Array<{ crawler: string; category: string | null; verified: number; fetches: number }>).map(
+              (r) => ({ crawler: r.crawler, category: r.category, verified: Boolean(r.verified), fetches: Number(r.fetches) }),
+            ),
             aiRefs: (aiRows.results ?? []) as Array<{ source: string; views: number }>,
             keywords: (keywordRows.results ?? []) as Array<{ term: string; views: number }>,
             devices: (deviceRows.results ?? []) as Array<{ device: string; views: number }>,
