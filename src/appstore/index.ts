@@ -222,7 +222,26 @@ export async function probeCreds(c: Creds): Promise<string | null> {
 
 // ---------- report requests + discovery ----------
 
+/** An existing request for this app + access type, preferring one Apple has not stopped. */
+async function findRequest(
+  c: Creds,
+  appleId: string,
+  accessType: "ONGOING" | "ONE_TIME_SNAPSHOT",
+  allowStopped: boolean,
+): Promise<string | null> {
+  const list = await asc(c, `/v1/apps/${appleId}/analyticsReportRequests?filter[accessType]=${accessType}&limit=10`);
+  if (list.status !== 200) return null;
+  const data: any[] = list.json?.data ?? [];
+  const found = data.find((d) => !d.attributes?.stoppedDueToInactivity) ?? (allowStopped ? data[0] : undefined);
+  return found?.id ? String(found.id) : null;
+}
+
 async function ensureRequest(c: Creds, appleId: string, accessType: "ONGOING" | "ONE_TIME_SNAPSHOT"): Promise<string> {
+  // Look first: only an Admin key may create a request, but a Sales/Reports key
+  // can read one. So an app whose request was created earlier (re-added, or set
+  // up once with a temporary Admin key) works on a reporting-only key.
+  const existing = await findRequest(c, appleId, accessType, false);
+  if (existing) return existing;
   const r = await asc(c, "/v1/analyticsReportRequests", {
     method: "POST",
     body: {
@@ -236,9 +255,8 @@ async function ensureRequest(c: Creds, appleId: string, accessType: "ONGOING" | 
   if (r.status === 201 && r.json?.data?.id) return String(r.json.data.id);
   // Only one request per app and access type: reuse the existing one.
   if (r.status === 409 || r.status === 422) {
-    const list = await asc(c, `/v1/apps/${appleId}/analyticsReportRequests?filter[accessType]=${accessType}&limit=10`);
-    const found = (list.json?.data ?? []).find((d: any) => !d.attributes?.stoppedDueToInactivity) ?? list.json?.data?.[0];
-    if (found?.id) return String(found.id);
+    const found = await findRequest(c, appleId, accessType, true);
+    if (found) return found;
   }
   throw new Error(ascError(r));
 }
